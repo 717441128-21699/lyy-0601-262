@@ -5,13 +5,32 @@ const EventSystem = {
 
         if (state.events.pending.length > 2) return;
 
-        if (Math.random() < diff.eventChance) {
-            const eventTypes = ['stranger', 'internal'];
-            const type = eventTypes[Math.floor(Math.random() * eventTypes.length)];
-            this.triggerRandomEvent(type);
+        let eventChance = diff.eventChance;
+        if (!state.gate.working) {
+            eventChance += 0.2;
+        }
+        if (!state.power.working) {
+            eventChance += 0.1;
         }
 
-        if (Math.random() < diff.disasterChance) {
+        if (Math.random() < eventChance) {
+            let eventTypes = ['stranger', 'internal'];
+            if (!state.gate.working && Math.random() < 0.6) {
+                eventTypes = ['stranger'];
+            }
+            const type = eventTypes[Math.floor(Math.random() * eventTypes.length)];
+            this.triggerRandomEvent(type);
+            if (!state.gate.working && type === 'stranger') {
+                GameState.addLog('⚠ 门禁损坏导致陌生人更容易闯入！', 'warning');
+            }
+        }
+
+        let disasterChance = diff.disasterChance;
+        if (!state.power.working) {
+            disasterChance += 0.05;
+        }
+
+        if (Math.random() < disasterChance) {
             this.triggerRandomEvent('disaster');
         }
     },

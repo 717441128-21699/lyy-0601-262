@@ -201,8 +201,17 @@ const UI = {
         document.getElementById('stat-sick').textContent = residents.filter(r => r.status === 'sick').length;
         document.getElementById('stat-injured').textContent = residents.filter(r => r.injured).length;
 
-        document.getElementById('stat-power').textContent = state.power.working ? '正常' : '故障';
-        document.getElementById('stat-gate').textContent = state.gate.working ? '正常' : '故障';
+        const powerStat = document.getElementById('stat-power');
+        const gateStat = document.getElementById('stat-gate');
+        powerStat.textContent = state.power.working ? '正常 ✓' : '故障 ⚠';
+        powerStat.style.color = state.power.working ? 'var(--success)' : 'var(--danger)';
+        powerStat.style.fontWeight = 'bold';
+        powerStat.title = state.power.working ? '电力系统运作正常' : '⚠ 电力故障！资源产出为0，士气-5/天';
+        
+        gateStat.textContent = state.gate.working ? '正常 ✓' : `故障 (${state.gate.health}%) ⚠`;
+        gateStat.style.color = state.gate.working ? 'var(--success)' : 'var(--danger)';
+        gateStat.style.fontWeight = 'bold';
+        gateStat.title = state.gate.working ? '门禁系统运作正常' : '⚠ 门禁损坏！防御下降，陌生人易入侵，士气-3/天';
         
         let totalRooms = 0;
         state.floors.forEach(f => totalRooms += f.rooms.length);
@@ -263,6 +272,57 @@ const UI = {
         }
 
         let html = '';
+        
+        const shiftSummary = ResidentSystem.getShiftSummary();
+        const shiftGroups = [
+            { key: 'doctor', name: '👨‍⚕️ 医生组', jobs: ['doctor'] },
+            { key: 'guard', name: '🛡️ 守卫组', jobs: ['guard'] },
+            { key: 'builder', name: '🔨 维修组', jobs: ['builder'] }
+        ];
+        
+        html += `
+            <div style="background: var(--bg-card); padding: 15px; border-radius: 8px; margin-bottom: 20px; grid-column: 1 / -1;">
+                <h3 style="margin-bottom: 15px; color: var(--primary); font-size: 14px;">📅 批量排班管理</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+        `;
+        
+        shiftGroups.forEach(group => {
+            const summary = shiftSummary[group.key];
+            const total = summary.morning.length + summary.night.length + summary.none.length;
+            html += `
+                <div style="background: var(--bg-dark); padding: 12px; border-radius: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <strong>${group.name}</strong>
+                        <span style="font-size: 12px; color: var(--text-muted);">共${total}人</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.6;">
+                        ☀️ 早班: ${summary.morning.map(r => r.avatar).join('') || '无'} (${summary.morning.length}人)<br>
+                        🌙 夜班: ${summary.night.map(r => r.avatar).join('') || '无'} (${summary.night.length}人)<br>
+                        🌓 无固定: ${summary.none.map(r => r.avatar).join('') || '无'} (${summary.none.length}人)
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn" style="padding: 4px 8px; font-size: 11px; flex: 1;"
+                                onclick="UI.batchShift('${group.jobs.join(',')}', 'morning')">
+                            ☀️ 全员早班
+                        </button>
+                        <button class="btn" style="padding: 4px 8px; font-size: 11px; flex: 1;"
+                                onclick="UI.batchShift('${group.jobs.join(',')}', 'night')">
+                            🌙 全员夜班
+                        </button>
+                        <button class="btn" style="padding: 4px 8px; font-size: 11px; flex: 1;"
+                                onclick="UI.batchShift('${group.jobs.join(',')}', 'none')">
+                            🌓 重置
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+
         residents.forEach(resident => {
             const job = ResidentSystem.getJob(resident.job);
             const statusClass = resident.status === 'sick' ? 'sick' : (resident.injured ? 'injured' : '');
@@ -502,6 +562,20 @@ const UI = {
     changeResidentShift(residentId, shiftId) {
         ResidentSystem.assignShift(residentId, shiftId);
         this.showResidentDetail(residentId);
+        this.renderAll();
+    },
+
+    batchShift(jobIdsStr, shiftId) {
+        const jobIds = jobIdsStr.split(',');
+        const result = ResidentSystem.assignShiftByJob(jobIds, shiftId);
+        const shift = ResidentSystem.getShift(shiftId);
+        if (result.changed > 0) {
+            UI.showToast(`成功调整了${result.changed}人的班次为${shift.name}`, 'success');
+        } else if (result.total > 0) {
+            UI.showToast(`这${result.total}人已经是${shift.name}了`, 'info');
+        } else {
+            UI.showToast('没有可调整的居民', 'info');
+        }
         this.renderAll();
     },
 
@@ -762,7 +836,43 @@ const UI = {
     },
 
     cancelRepairTask(taskId) {
-        BuildingSystem.removeRepairTask(taskId);
+        const result = BuildingSystem.removeRepairTask(taskId);
+        if (result && result.success) {
+            let html = `
+                <h4>${result.taskName} - 维修任务取消报告</h4>
+                <p>完成进度: <strong>${result.progress}%</strong></p>
+                <br>
+                <div style="background: var(--bg-dark); padding: 12px; border-radius: 6px;">
+                    <p>📦 物资明细:</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px;">
+                        <p>材料已投入: <strong>${result.materialsSpent}</strong></p>
+                        <p>材料已消耗: <strong>${result.materialsUsed}</strong></p>
+                        <p style="color: var(--success);">材料已返还: <strong>${result.materialsReturned}</strong></p>
+                        <p>零件已投入: <strong>${result.partsSpent}</strong></p>
+                        <p>零件已消耗: <strong>${result.partsUsed}</strong></p>
+                        <p style="color: var(--success);">零件已返还: <strong>${result.partsReturned}</strong></p>
+                    </div>
+                </div>
+            `;
+            if (result.reasonNoReturn && result.reasonNoReturn.length > 0) {
+                html += `
+                    <br>
+                    <p style="font-size: 12px; color: var(--warning);">
+                        <strong>💡 说明:</strong><br>
+                        ${result.reasonNoReturn.map(r => '• ' + r).join('<br>')}
+                    </p>
+                `;
+            }
+            if (result.materialsReturned > 0 || result.partsReturned > 0) {
+                let total = [];
+                if (result.materialsReturned > 0) total.push(`${result.materialsReturned}材料`);
+                if (result.partsReturned > 0) total.push(`${result.partsReturned}零件`);
+                UI.showToast(`已返还 ${total.join('、')}`, 'success');
+            }
+            this.showModal('维修任务已取消', html);
+        } else if (result && result.reason) {
+            UI.showToast(result.reason, 'error');
+        }
         this.renderAll();
     },
 
@@ -1275,9 +1385,193 @@ const UI = {
         }, 10);
     },
 
+    showDailyReport(report) {
+        const state = GameState.getState();
+        const day = report.day || state.day;
+        
+        let html = `
+            <div style="font-size: 13px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="margin: 0; color: var(--primary);">📊 第${day}天 - 经营日报</h4>
+                    <span style="font-size: 12px; color: var(--text-muted);">
+                        士气: <strong style="color: ${report.moraleChange >= 0 ? 'var(--success)' : 'var(--danger)'};">
+                            ${report.moraleChange >= 0 ? '+' : ''}${report.moraleChange}
+                        </strong> (${report.morale}%)
+                    </span>
+                </div>
+        `;
+
+        html += `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
+                <div style="background: var(--bg-dark); padding: 10px; border-radius: 6px;">
+                    <p style="color: var(--success); margin-bottom: 8px;"><strong>📦 物资产出</strong></p>
+                    <p>🍞 食物: +${report.production.food}</p>
+                    <p>💧 水: +${report.production.water}</p>
+                    ${report.production.materials > 0 ? `<p>🔧 材料: +${report.production.materials}</p>` : ''}
+                    ${report.production.parts > 0 ? `<p>⚙️ 零件: +${report.production.parts}</p>` : ''}
+                    ${!report.facilities.powerWorking ? '<p style="color: var(--danger); margin-top: 6px;">⚠ 电力故障，产出受阻</p>' : ''}
+                </div>
+                <div style="background: var(--bg-dark); padding: 10px; border-radius: 6px;">
+                    <p style="color: var(--warning); margin-bottom: 8px;"><strong>🍽️ 物资消耗</strong></p>
+                    <p>🍞 食物: -${report.consumption.food}</p>
+                    <p>💧 水: -${report.consumption.water}</p>
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color);">
+                        <p>当日净变化:</p>
+                        <p style="color: ${report.netChange.food >= 0 ? 'var(--success)' : 'var(--danger)'};">
+                            🍞 食物: ${report.netChange.food >= 0 ? '+' : ''}${report.netChange.food}
+                        </p>
+                        <p style="color: ${report.netChange.water >= 0 ? 'var(--success)' : 'var(--danger)'};">
+                            💧 水: ${report.netChange.water >= 0 ? '+' : ''}${report.netChange.water}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        html += `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
+                <div style="background: var(--bg-dark); padding: 10px; border-radius: 6px;">
+                    <p style="color: var(--info); margin-bottom: 8px;"><strong>🏥 医疗进展</strong></p>
+                    <p>今日康复: <strong style="color: var(--success);">${report.healing.healed}</strong> 人</p>
+                    <p>当前患病人数: ${report.healing.sickCount} 人</p>
+                </div>
+                <div style="background: var(--bg-dark); padding: 10px; border-radius: 6px;">
+                    <p style="color: var(--warning); margin-bottom: 8px;"><strong>🛡️ 安保状态</strong></p>
+                    <p>防御值: <strong>${report.security.defense}</strong></p>
+                    <p>执勤守卫: ${report.security.guardsOnDuty} 人</p>
+                    ${!report.facilities.gateWorking ? '<p style="color: var(--danger);">⚠ 门禁损坏，防御下降</p>' : ''}
+                </div>
+            </div>
+        `;
+
+        if (report.repairs && report.repairs.length > 0) {
+            html += `
+                <div style="background: var(--bg-dark); padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+                    <p style="color: var(--primary); margin-bottom: 8px;"><strong>🔨 维修进度</strong></p>
+            `;
+            report.repairs.forEach(r => {
+                html += `
+                    <div style="padding: 6px 0; border-bottom: 1px solid var(--border-color);">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>${r.name}</span>
+                            <span style="color: ${r.progressGained > 0 ? 'var(--success)' : 'var(--text-muted)'};">
+                                ${r.progressGained > 0 ? '+' + r.progressGained + '%' : '无进展'}
+                            </span>
+                        </div>
+                        <div style="margin-top: 4px;">
+                            <div style="width: 100%; height: 6px; background: var(--bg-card); border-radius: 3px;">
+                                <div style="width: ${r.progress}%; height: 100%; background: var(--primary); border-radius: 3px;"></div>
+                            </div>
+                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                                总进度: ${r.progress}% | ${r.workers}名工人 | 预计还需 ${r.estimatedDays === null ? '需分配工人' : r.estimatedDays + '天'}
+                            </p>
+                        </div>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
+
+        html += `
+            <div style="background: var(--bg-dark); padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+                <p style="color: var(--danger); margin-bottom: 8px;"><strong>💀 伤亡情况</strong></p>
+                ${report.casualties.totalDeaths === 0 && report.casualties.newInjured === 0 
+                    ? '<p style="color: var(--success);">今日无伤亡 🎉</p>' 
+                    : `
+                        ${report.casualties.totalDeaths > 0 ? `
+                            <p>今日死亡: <strong style="color: var(--danger);">${report.casualties.totalDeaths}</strong> 人</p>
+                            <ul style="font-size: 12px; color: var(--text-secondary); padding-left: 20px; margin: 4px 0;">
+                                ${report.casualties.normalDeaths > 0 ? `<li>正常死亡: ${report.casualties.normalDeaths}人</li>` : ''}
+                                ${report.casualties.sickDeaths > 0 ? `<li>病亡: ${report.casualties.sickDeaths}人</li>` : ''}
+                                ${report.casualties.explorationDeaths > 0 ? `<li>探索牺牲: ${report.casualties.explorationDeaths}人</li>` : ''}
+                            </ul>
+                        ` : ''}
+                        ${report.casualties.newInjured > 0 ? `<p>新增受伤: <strong>${report.casualties.newInjured}</strong> 人</p>` : ''}
+                    `
+                }
+            </div>
+        `;
+
+        if (report.facilities.powerChanged || report.facilities.gateChanged) {
+            html += `
+                <div style="background: rgba(255, 152, 0, 0.1); padding: 10px; border-radius: 6px; border: 1px solid var(--warning);">
+                    <p style="color: var(--warning); margin-bottom: 5px;"><strong>⚡ 设施变化</strong></p>
+                    ${report.facilities.powerChanged ? `<p>电力系统: ${report.facilities.powerWorking ? '<span style="color: var(--success);">✓ 已修复</span>' : '<span style="color: var(--danger);">⚠ 发生故障</span>'}</p>` : ''}
+                    ${report.facilities.gateChanged ? `<p>门禁系统: ${report.facilities.gateWorking ? `<span style="color: var(--success);">✓ 正常 (耐久${report.facilities.gateHealth}%)</span>` : `<span style="color: var(--danger);">⚠ 损坏 (耐久${report.facilities.gateHealth}%)</span>`}</p>` : ''}
+                </div>
+            `;
+        }
+
+        html += `</div>`;
+        
+        this.showModal(`📊 第${day}天 经营日报`, html);
+    },
+
+    showDailyReportHistory() {
+        const state = GameState.getState();
+        const reports = state.dailyReports || [];
+        
+        if (reports.length === 0) {
+            this.showToast('暂无历史日报', 'info');
+            return;
+        }
+
+        let html = '<div style="max-height: 500px; overflow-y: auto;">';
+        html += '<p style="margin-bottom: 12px; color: var(--text-muted);">共 ' + reports.length + ' 份历史日报</p>';
+        
+        reports.slice().reverse().forEach(report => {
+            const day = report.day;
+            const summary = [];
+            if (report.netChange) {
+                summary.push(`食物${report.netChange.food >= 0 ? '+' : ''}${report.netChange.food}`);
+                summary.push(`水${report.netChange.water >= 0 ? '+' : ''}${report.netChange.water}`);
+            }
+            if (report.casualties && report.casualties.totalDeaths > 0) {
+                summary.push(`死亡${report.casualties.totalDeaths}人`);
+            }
+            if (report.repairs && report.repairs.length > 0) {
+                summary.push(`${report.repairs.length}项维修`);
+            }
+            html += `
+                <div style="padding: 10px; margin-bottom: 8px; background: var(--bg-dark); border-radius: 6px; cursor: pointer;"
+                     onclick="UI.viewDailyReport(${day})">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong>第${day}天</strong>
+                        <span style="font-size: 12px; color: var(--text-secondary);">
+                            ${summary.join(' | ')}
+                        </span>
+                    </div>
+                    ${report.moraleChange !== undefined ? `
+                        <p style="margin-top: 4px; font-size: 12px;">
+                            士气: ${report.moraleChange >= 0 ? '+' : ''}${report.moraleChange} (${report.morale}%)
+                        </p>
+                    ` : ''}
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        this.showModal('📊 历史经营日报', html);
+    },
+
+    viewDailyReport(day) {
+        const report = GameState.getDailyReport(day);
+        if (report) {
+            this.showDailyReport(report);
+        }
+    },
+
     showLogModal() {
         const state = GameState.getState();
-        let html = '<div style="max-height: 400px; overflow-y: auto;">';
+        let html = `
+            <div style="margin-bottom: 12px;">
+                <button class="btn" style="padding: 6px 12px; font-size: 12px;"
+                        onclick="UI.showDailyReportHistory()">
+                    📊 查看经营日报
+                </button>
+            </div>
+            <div style="max-height: 360px; overflow-y: auto;">
+        `;
         
         state.log.forEach(log => {
             const typeColor = log.type === 'success' ? 'var(--success)' : 

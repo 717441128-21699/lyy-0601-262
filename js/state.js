@@ -136,6 +136,8 @@ const GameState = {
             },
             missions: [],
             repairQueue: [],
+            dailyReports: [],
+            pendingDailyReport: null,
             stats: {
                 totalJoined: 0,
                 totalDeaths: 0,
@@ -310,6 +312,22 @@ const GameState = {
         this.state.stats.residentContributions[residentId][type] = (this.state.stats.residentContributions[residentId][type] || 0) + amount;
     },
 
+    addDailyReport(report) {
+        report.day = this.state.day;
+        report.date = new Date().toISOString();
+        this.state.dailyReports.push(report);
+        this.state.pendingDailyReport = report;
+    },
+
+    getDailyReport(day) {
+        if (day) {
+            return this.state.dailyReports.find(r => r.day === day) || null;
+        }
+        return this.state.dailyReports.length > 0 
+            ? this.state.dailyReports[this.state.dailyReports.length - 1] 
+            : null;
+    },
+
     addMorale(amount) {
         this.state.morale = Math.max(0, Math.min(100, this.state.morale + amount));
     },
@@ -452,6 +470,8 @@ const GameState = {
 
     migrateState(state) {
         if (!state.repairQueue) state.repairQueue = [];
+        if (!state.dailyReports) state.dailyReports = [];
+        if (!state.pendingDailyReport) state.pendingDailyReport = null;
         if (!state.missions) state.missions = [];
         if (!state.log) state.log = [];
         if (!state.achievements) state.achievements = [];

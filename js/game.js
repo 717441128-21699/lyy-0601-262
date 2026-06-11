@@ -31,6 +31,19 @@ const Game = {
             return;
         }
 
+        const beforeResources = { ...state.resources };
+        const beforeDeaths = state.stats.totalDeaths;
+        const beforeNormalDeaths = state.stats.totalNormalDeaths || 0;
+        const beforeSickDeaths = state.stats.totalSickDeaths || 0;
+        const beforeExplorationDeaths = state.stats.totalExplorationDeaths || 0;
+        const beforeHealed = state.stats.totalHealed;
+        const beforePowerWorking = state.power.working;
+        const beforeGateWorking = state.gate.working;
+        const beforeGateHealth = state.gate.health;
+        const beforeMorale = state.morale;
+        const beforeRepairQueue = state.repairQueue.map(t => ({ id: t.id, progress: t.progress }));
+        const beforeInjured = state.residents.filter(r => r.injured).length;
+
         state.day++;
         state.timeOfDay = 'morning';
 
@@ -84,12 +97,76 @@ const Game = {
         const ending = GameState.checkEndings();
         if (ending) {
             this.showEnding(ending);
+            return;
         }
 
+        const report = {
+            production: {
+                food: Math.round(production.food),
+                water: Math.round(production.water),
+                materials: Math.round(production.materials),
+                parts: Math.round(production.parts)
+            },
+            consumption: {
+                food: Math.round(consumption.food),
+                water: Math.round(consumption.water)
+            },
+            netChange: {
+                food: state.resources.food - beforeResources.food,
+                water: state.resources.water - beforeResources.water,
+                medicine: state.resources.medicine - beforeResources.medicine,
+                materials: state.resources.materials - beforeResources.materials,
+                parts: state.resources.parts - beforeResources.parts
+            },
+            healing: {
+                healed: state.stats.totalHealed - beforeHealed,
+                sickCount: state.residents.filter(r => r.status === 'sick').length
+            },
+            repairs: state.repairQueue.map(t => {
+                const before = beforeRepairQueue.find(b => b.id === t.id);
+                const progressGained = before ? t.progress - before.progress : t.progress;
+                const estimatedDays = BuildingSystem.getEstimatedDays(t);
+                return {
+                    id: t.id,
+                    name: t.name,
+                    targetType: t.targetType,
+                    progress: Math.floor((t.progress / t.maxProgress) * 100),
+                    progressGained: Math.floor((progressGained / t.maxProgress) * 100),
+                    workers: t.assignedWorkers.length,
+                    estimatedDays
+                };
+            }),
+            facilities: {
+                powerWorking: state.power.working,
+                powerChanged: state.power.working !== beforePowerWorking,
+                gateWorking: state.gate.working,
+                gateHealth: state.gate.health,
+                gateChanged: (state.gate.working !== beforeGateWorking) || (state.gate.health !== beforeGateHealth)
+            },
+            security: {
+                defense: ResourceSystem.getDefenseValue(),
+                guardsOnDuty: state.residents.filter(r => r.job === 'guard' && r.status === 'healthy').length
+            },
+            casualties: {
+                totalDeaths: state.stats.totalDeaths - beforeDeaths,
+                normalDeaths: (state.stats.totalNormalDeaths || 0) - beforeNormalDeaths,
+                sickDeaths: (state.stats.totalSickDeaths || 0) - beforeSickDeaths,
+                explorationDeaths: (state.stats.totalExplorationDeaths || 0) - beforeExplorationDeaths,
+                newInjured: Math.max(0, state.residents.filter(r => r.injured).length - beforeInjured)
+            },
+            moraleChange: Math.round(state.morale - beforeMorale),
+            morale: state.morale
+        };
+
+        GameState.addDailyReport(report);
         GameState.addLog(`第${state.day}天开始。`, 'info');
         
         UI.renderAll();
         GameState.save();
+
+        setTimeout(() => {
+            UI.showDailyReport(report);
+        }, 300);
     },
 
     updateFacilities() {

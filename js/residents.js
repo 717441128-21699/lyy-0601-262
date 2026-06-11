@@ -124,6 +124,57 @@ const ResidentSystem = {
         return true;
     },
 
+    assignShiftByJob(jobIds, shiftId) {
+        const state = GameState.getState();
+        if (!this.shifts[shiftId]) return { changed: 0, total: 0 };
+        
+        const targetJobs = Array.isArray(jobIds) ? jobIds : [jobIds];
+        let changed = 0;
+        let total = 0;
+        const names = [];
+        
+        state.residents.forEach(resident => {
+            if (targetJobs.includes(resident.job) && resident.status === 'healthy' && !resident.onMission) {
+                total++;
+                if (resident.shift !== shiftId) {
+                    resident.shift = shiftId;
+                    changed++;
+                    names.push(resident.name);
+                }
+            }
+        });
+        
+        if (changed > 0) {
+            const shift = this.getShift(shiftId);
+            GameState.addLog(`批量调整了${changed}人的班次为${shift.name}：${names.join('、')}`, 'info');
+            GameState.save();
+        }
+        
+        return { changed, total, names };
+    },
+
+    getShiftSummary() {
+        const state = GameState.getState();
+        const summary = {
+            doctor: { morning: [], night: [], none: [] },
+            guard: { morning: [], night: [], none: [] },
+            builder: { morning: [], night: [], none: [] },
+            other: { morning: [], night: [], none: [] }
+        };
+        
+        state.residents.forEach(r => {
+            let group = 'other';
+            if (r.job === 'doctor') group = 'doctor';
+            else if (r.job === 'guard') group = 'guard';
+            else if (r.job === 'builder') group = 'builder';
+            
+            const shift = r.shift || 'none';
+            summary[group][shift].push(r);
+        });
+        
+        return summary;
+    },
+
     assignJob(residentId, jobId) {
         const state = GameState.getState();
         const resident = state.residents.find(r => r.id === residentId);

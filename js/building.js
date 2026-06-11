@@ -111,35 +111,69 @@ const BuildingSystem = {
     removeRepairTask(taskId) {
         const state = GameState.getState();
         const idx = state.repairQueue.findIndex(t => t.id === taskId);
-        if (idx === -1) return false;
+        if (idx === -1) return { success: false, reason: '任务不存在，可能已完成或已取消' };
         
         const task = state.repairQueue[idx];
         const progressRatio = task.progress / task.maxProgress;
         const materialsReturned = Math.floor(task.materialsSpent * (1 - progressRatio) * 0.5);
         const partsReturned = Math.floor((task.partsSpent || 0) * (1 - progressRatio) * 0.5);
         
+        const materialsUsed = task.materialsSpent - materialsReturned;
+        const partsUsed = (task.partsSpent || 0) - partsReturned;
+        
         state.repairQueue.splice(idx, 1);
         
-        let returnStr = '';
         if (materialsReturned > 0) {
             GameState.addResource('materials', materialsReturned);
             GameState.addResourceConsumed('materials', -materialsReturned);
-            returnStr += `${materialsReturned}材料`;
         }
         if (partsReturned > 0) {
             GameState.addResource('parts', partsReturned);
             GameState.addResourceConsumed('parts', -partsReturned);
-            if (returnStr) returnStr += '、';
-            returnStr += `${partsReturned}零件`;
+        }
+
+        let reasonNoReturn = [];
+        if (progressRatio >= 0.9) {
+            reasonNoReturn.push('任务即将完成（90%以上），大部分物资已消耗');
+        } else if (progressRatio >= 0.5) {
+            reasonNoReturn.push('任务过半，约一半物资已在施工中消耗，无法回收');
+        }
+        if (materialsUsed > 0 && materialsReturned === 0) {
+            reasonNoReturn.push('材料数量过少，向下取整后无可返还');
+        }
+        if ((task.partsSpent || 0) > 0 && partsReturned === 0) {
+            reasonNoReturn.push('零件数量过少，向下取整后无可返还');
+        }
+        if (reasonNoReturn.length === 0 && (materialsReturned > 0 || partsReturned > 0)) {
+            reasonNoReturn.push('仅可回收未消耗部分的50%物资（其余施工中损耗）');
         }
         
-        GameState.addLog(`${task.name}的维修任务已取消${returnStr ? `，返还${returnStr}` : ''}。`, 'info');
-        UI.showToast(`${task.name}维修任务已取消${returnStr ? `，返还${returnStr}` : ''}`, 'info');
+        let logStr = `${task.name}的维修任务已取消。已投入: ${task.materialsSpent}材料${task.partsSpent ? `、${task.partsSpent}零件` : ''}。完成进度: ${Math.floor(progressRatio * 100)}%`;
+        if (materialsReturned > 0 || partsReturned > 0) {
+            let rs = '';
+            if (materialsReturned > 0) rs += `${materialsReturned}材料`;
+            if (partsReturned > 0) {
+                if (rs) rs += '、';
+                rs += `${partsReturned}零件`;
+            }
+            logStr += `。返还: ${rs}`;
+        } else {
+            logStr += '。无可返还物资';
+        }
+        GameState.addLog(logStr + `。`, 'info');
+        
         GameState.save();
         return {
             success: true,
+            taskName: task.name,
+            progress: Math.floor(progressRatio * 100),
+            materialsSpent: task.materialsSpent,
+            partsSpent: task.partsSpent || 0,
             materialsReturned,
-            partsReturned
+            partsReturned,
+            materialsUsed,
+            partsUsed,
+            reasonNoReturn
         };
     },
 
