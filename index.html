@@ -269,6 +269,8 @@
                                 <span class="cost">材料: 10, 零件: 3</span>
                             </button>
                         </div>
+                        <h3>🔧 维修任务队列</h3>
+                        <div id="repair-queue" class="repair-queue-list"></div>
                     </div>
                 </div>
             </section>
@@ -288,7 +290,9 @@
                     <div class="medical-right">
                         <h3>病患列表</h3>
                         <div id="patient-list" class="patient-list"></div>
-                        <h3>隔离区</h3>
+                        <h3>🏥 医疗室（住院治疗）</h3>
+                        <div id="medical-room-list" class="patient-list"></div>
+                        <h3>⚠️ 隔离区</h3>
                         <div id="quarantine-list" class="quarantine-list"></div>
                     </div>
                 </div>
@@ -341,7 +345,9 @@
                             <button class="diff-btn" data-diff="hard">困难</button>
                             <button class="diff-btn locked" data-diff="nightmare">噩梦 🔒</button>
                         </div>
-                        <button id="btn-restart" class="btn btn-danger">重新开始</button>
+                        <h3 style="margin-top: 20px;">🏆 历史最佳记录</h3>
+                        <div id="high-scores-list" class="achievements-list"></div>
+                        <button id="btn-restart" class="btn btn-danger" style="margin-top: 10px;">重新开始</button>
                     </div>
                 </div>
             </section>

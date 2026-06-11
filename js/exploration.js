@@ -153,12 +153,22 @@ const ExplorationSystem = {
             if (amount > 0) {
                 loot[resource] = amount;
                 GameState.addResource(resource, amount);
+                GameState.addExplorationGain(resource, amount);
             }
         }
 
         const lootStr = Object.entries(loot)
             .map(([k, v]) => `${this.getResourceName(k)}+${v}`)
             .join(', ');
+        
+        mission.team.forEach(resId => {
+            const resident = state.residents.find(r => r.id === resId);
+            if (resident) {
+                let contribution = 3;
+                if (Object.keys(loot).length > 0) contribution += 5;
+                GameState.addResidentContribution(resident.id, 'explorations', contribution);
+            }
+        });
         
         GameState.addLog(`探索队伍从${location.name}返回，获得：${lootStr || '一无所获'}。`, loot ? 'success' : 'info');
         

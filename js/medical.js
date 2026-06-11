@@ -19,9 +19,72 @@ const MedicalSystem = {
         return state.residents.filter(r => r.quarantined);
     },
 
+    getHospitalized() {
+        const state = GameState.getState();
+        return state.residents.filter(r => r.hospitalized);
+    },
+
     getDoctors() {
         const state = GameState.getState();
         return state.residents.filter(r => r.job === 'doctor' && r.status === 'healthy' && !r.onMission);
+    },
+
+    getMedicalBedsUsed() {
+        return this.getHospitalized().length;
+    },
+
+    getQuarantineBedsUsed() {
+        return this.getQuarantined().length;
+    },
+
+    hospitalize(residentId) {
+        const state = GameState.getState();
+        const resident = state.residents.find(r => r.id === residentId);
+        
+        if (!resident) return false;
+        if (resident.hospitalized) {
+            UI.showToast('该居民已在医疗室', 'info');
+            return false;
+        }
+        if (resident.status !== 'sick' && !resident.injured) {
+            UI.showToast('该居民不需要住院', 'info');
+            return false;
+        }
+
+        const medBeds = ResourceSystem.getMedicalBeds();
+        const hospitalized = this.getHospitalized();
+        
+        if (hospitalized.length >= medBeds) {
+            UI.showToast('医疗室床位不足，请先建造更多医疗室', 'error');
+            return false;
+        }
+
+        resident.hospitalized = true;
+        if (resident.assignedRoom) {
+            resident.assignedRoom = null;
+            GameState.addLog(`${resident.name} 的房间分配已取消（住院）。`, 'info');
+        }
+        GameState.addLog(`${resident.name} 被送入医疗室治疗。`, 'info');
+        UI.showToast(`${resident.name} 已送入医疗室`, 'info');
+        GameState.save();
+        return true;
+    },
+
+    dischargeFromHospital(residentId) {
+        const state = GameState.getState();
+        const resident = state.residents.find(r => r.id === residentId);
+        
+        if (!resident) return false;
+        if (!resident.hospitalized) {
+            UI.showToast('该居民不在医疗室', 'info');
+            return false;
+        }
+
+        resident.hospitalized = false;
+        GameState.addLog(`${resident.name} 离开医疗室。`, 'info');
+        UI.showToast(`${resident.name} 已离开医疗室`, 'info');
+        GameState.save();
+        return true;
     },
 
     treatSick(residentId) {
@@ -33,38 +96,56 @@ const MedicalSystem = {
             UI.showToast('该居民没有生病', 'info');
             return false;
         }
+
+        const medicineCost = resident.sickSeverity === 'critical' ? 5 : 
+                            resident.sickSeverity === 'severe' ? 3 : 2;
         
-        if (!GameState.hasResource('medicine', 2)) {
-            UI.showToast('药品不足', 'error');
+        if (!GameState.hasResource('medicine', medicineCost)) {
+            UI.showToast(`药品不足！需要${medicineCost}药品`, 'error');
             return false;
         }
 
         const doctors = this.getDoctors();
-        let healChance = 0.4;
+        let healProgress = 20;
         
         if (doctors.length > 0) {
-            healChance += doctors.length * 0.15;
+            healProgress += doctors.length * 10;
             const hasMedic = doctors.some(d => d.traits.includes('medical'));
-            if (hasMedic) healChance += 0.2;
+            if (hasMedic) healProgress += 15;
         }
 
+        if (resident.hospitalized) healProgress += 15;
         const medRooms = ResourceSystem.countRoomsByType('medical_room');
-        if (medRooms > 0) healChance += 0.15;
+        if (medRooms > 0) healProgress += 10;
 
-        GameState.removeResource('medicine', 2);
+        const disease = ResidentSystem.getDisease(resident.sickType);
+        if (disease) {
+            const severityMultiplier = { mild: 1.5, moderate: 1, severe: 0.7, critical: 0.5 };
+            healProgress *= severityMultiplier[disease.severity] || 1;
+        }
 
-        if (Math.random() < healChance) {
+        GameState.removeResource('medicine', medicineCost);
+        GameState.addResourceConsumed('medicine', medicineCost);
+
+        resident.treatmentProgress = Math.min(100, resident.treatmentProgress + healProgress);
+
+        if (resident.treatmentProgress >= 100) {
             ResidentSystem.recoverFromSickness(resident);
             state.stats.totalHealed++;
             GameState.checkAchievements();
-            GameState.addLog(`${resident.name} 治疗后痊愈了。`, 'success');
+            if (resident.quarantined) {
+                this.unquarantine(resident.id);
+            }
+            if (resident.hospitalized) {
+                this.dischargeFromHospital(resident.id);
+            }
+            GameState.addLog(`${resident.name} 治疗后痊愈了！（治疗进度: 100%）`, 'success');
             UI.showToast(`${resident.name} 痊愈了！`, 'success');
             GameState.save();
             return true;
         } else {
-            resident.sickDays = Math.max(0, resident.sickDays - 2);
-            GameState.addLog(`${resident.name} 接受了治疗，病情有所好转。`, 'info');
-            UI.showToast('治疗有效果，但还需要继续治疗', 'info');
+            GameState.addLog(`${resident.name} 接受了治疗（治疗进度: ${Math.floor(resident.treatmentProgress)}%）。`, 'info');
+            UI.showToast(`治疗进度: ${Math.floor(resident.treatmentProgress)}%`, 'info');
             GameState.save();
             return false;
         }
@@ -92,8 +173,14 @@ const MedicalSystem = {
             return false;
         }
 
-        if (needBandage) GameState.removeResource('bandage', 2);
-        if (needMedicine) GameState.removeResource('medicine', 1);
+        if (needBandage) {
+            GameState.removeResource('bandage', 2);
+            GameState.addResourceConsumed('bandage', 2);
+        }
+        if (needMedicine) {
+            GameState.removeResource('medicine', 1);
+            GameState.addResourceConsumed('medicine', 1);
+        }
 
         const doctors = this.getDoctors();
         let healAmount = 20;
@@ -104,6 +191,7 @@ const MedicalSystem = {
             if (hasMedic) healAmount *= 1.5;
         }
 
+        if (resident.hospitalized) healAmount += 10;
         const medRooms = ResourceSystem.countRoomsByType('medical_room');
         if (medRooms > 0) healAmount += 10;
 
@@ -113,11 +201,14 @@ const MedicalSystem = {
             ResidentSystem.healInjury(resident);
             state.stats.totalHealed++;
             GameState.checkAchievements();
+            if (resident.hospitalized) {
+                this.dischargeFromHospital(resident.id);
+            }
             GameState.addLog(`${resident.name} 的伤好了！`, 'success');
             UI.showToast(`${resident.name} 的伤好了！`, 'success');
         } else {
-            GameState.addLog(`${resident.name} 接受了治疗，伤势有所好转。`, 'info');
-            UI.showToast('伤势有所好转', 'info');
+            GameState.addLog(`${resident.name} 接受了治疗，伤势: ${Math.floor(resident.injurySeverity)}%。`, 'info');
+            UI.showToast(`伤势: ${Math.floor(resident.injurySeverity)}%，正在恢复`, 'info');
         }
 
         GameState.save();
@@ -146,9 +237,13 @@ const MedicalSystem = {
         resident.quarantined = true;
         if (resident.assignedRoom) {
             resident.assignedRoom = null;
+            GameState.addLog(`${resident.name} 的房间分配已取消（隔离）。`, 'info');
         }
-        GameState.addLog(`${resident.name} 被送进隔离区。`, 'warning');
+        const disease = ResidentSystem.getDisease(resident.sickType);
+        const severityText = disease ? `（${ResidentSystem.getSeverityName(disease.severity)}${disease.infectious ? '，传染性' : ''}）` : '';
+        GameState.addLog(`${resident.name} 被送进隔离区${severityText}。`, 'warning');
         UI.showToast(`${resident.name} 已送入隔离区`, 'info');
+        GameState.save();
         return true;
     },
 
@@ -166,6 +261,7 @@ const MedicalSystem = {
         resident.quarantined = false;
         GameState.addLog(`${resident.name} 解除隔离。`, 'info');
         UI.showToast(`${resident.name} 已解除隔离`, 'info');
+        GameState.save();
         return true;
     },
 
@@ -177,12 +273,21 @@ const MedicalSystem = {
             if (resident.injured && resident.injurySeverity > 0) {
                 let naturalHeal = 2;
                 if (doctors.length > 0) naturalHeal += 3;
+                if (resident.hospitalized) naturalHeal += 5;
                 if (resident.traits.includes('strong')) naturalHeal *= 1.5;
                 
                 resident.injurySeverity = Math.max(0, resident.injurySeverity - naturalHeal);
                 if (resident.injurySeverity <= 0) {
                     ResidentSystem.healInjury(resident);
+                    if (resident.hospitalized) {
+                        this.dischargeFromHospital(resident.id);
+                    }
                 }
+            }
+
+            if (resident.status === 'sick' && resident.hospitalized && doctors.length > 0) {
+                const passiveHeal = 5 + doctors.length * 3;
+                resident.treatmentProgress = Math.min(100, resident.treatmentProgress + passiveHeal);
             }
         });
 
@@ -206,8 +311,12 @@ const MedicalSystem = {
         if (ResourceSystem.countRoomsByType('medical_room') > 0) diseaseChance *= 0.6;
 
         if (Math.random() < diseaseChance) {
-            ResidentSystem.makeSick(target);
-            GameState.addLog(`${target.name} 生病了！`, 'warning');
+            const diseasePool = ['flu', 'flu', 'flu', 'infection', 'infection', 'pneumonia'];
+            const sickType = diseasePool[Math.floor(Math.random() * diseasePool.length)];
+            ResidentSystem.makeSick(target, sickType);
+            const disease = ResidentSystem.getDisease(sickType);
+            const severityText = disease ? `（${ResidentSystem.getSeverityName(disease.severity)}）` : '';
+            GameState.addLog(`${target.name} 生病了${severityText}！`, 'warning');
             UI.showToast(`${target.name} 生病了`, 'warning');
         }
     },
@@ -221,9 +330,12 @@ const MedicalSystem = {
 
         GameState.removeResource('materials', 30);
         GameState.removeResource('parts', 10);
+        GameState.addResourceConsumed('materials', 30);
+        GameState.addResourceConsumed('parts', 10);
         
         GameState.addLog('医疗设施升级了！', 'success');
         UI.showToast('医疗设施升级成功', 'success');
+        GameState.save();
         return true;
     }
 };

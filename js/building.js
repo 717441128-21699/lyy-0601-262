@@ -32,6 +32,191 @@ const BuildingSystem = {
         return names[type] || type;
     },
 
+    addRepairTask(targetType, targetId, assignedWorkers = []) {
+        const state = GameState.getState();
+        
+        if (state.repairQueue.find(t => t.targetType === targetType && t.targetId === targetId)) {
+            UI.showToast('该目标已在维修队列中', 'info');
+            return null;
+        }
+
+        let taskName = '';
+        let maxHealth = 100;
+        let currentHealth = 0;
+
+        if (targetType === 'room') {
+            const room = this.findRoom(targetId);
+            if (!room || room.health >= 100) return null;
+            const roomData = GameData.rooms.find(r => r.id === room.type);
+            taskName = roomData ? roomData.name : '房间';
+            currentHealth = room.health;
+        } else if (targetType === 'power') {
+            if (state.power.working) return null;
+            taskName = '电力系统';
+            currentHealth = 0;
+        } else if (targetType === 'gate') {
+            if (state.gate.working && state.gate.health >= 100) return null;
+            taskName = '门禁系统';
+            currentHealth = state.gate.health;
+        } else {
+            return null;
+        }
+
+        const repairCost = Math.ceil((maxHealth - currentHealth) / 10) * 2;
+        
+        if (!GameState.hasResource('materials', repairCost)) {
+            UI.showToast(`材料不足！需要${repairCost}材料`, 'error');
+            return null;
+        }
+
+        const task = {
+            id: 'repair_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            targetType: targetType,
+            targetId: targetId,
+            name: taskName,
+            progress: 0,
+            maxProgress: maxHealth - currentHealth,
+            assignedWorkers: [...assignedWorkers],
+            materialsSpent: repairCost,
+            createdAt: state.day
+        };
+
+        GameState.removeResource('materials', repairCost);
+        GameState.addResourceConsumed('materials', repairCost);
+        state.repairQueue.push(task);
+
+        GameState.addLog(`已创建${taskName}的维修任务，消耗${repairCost}材料。`, 'info');
+        UI.showToast(`${taskName}维修任务已创建`, 'success');
+        GameState.save();
+        return task;
+    },
+
+    removeRepairTask(taskId) {
+        const state = GameState.getState();
+        const idx = state.repairQueue.findIndex(t => t.id === taskId);
+        if (idx === -1) return false;
+        
+        const task = state.repairQueue[idx];
+        state.repairQueue.splice(idx, 1);
+        GameState.addLog(`${task.name}的维修任务已取消。`, 'info');
+        UI.showToast(`${task.name}维修任务已取消`, 'info');
+        GameState.save();
+        return true;
+    },
+
+    assignWorkerToRepair(taskId, residentId) {
+        const state = GameState.getState();
+        const task = state.repairQueue.find(t => t.id === taskId);
+        const resident = state.residents.find(r => r.id === residentId);
+        
+        if (!task || !resident) return false;
+        if (task.assignedWorkers.includes(residentId)) return false;
+        if (resident.onMission || resident.status !== 'healthy') {
+            UI.showToast('该居民无法工作', 'warning');
+            return false;
+        }
+
+        task.assignedWorkers.push(residentId);
+        GameState.addLog(`${resident.name} 被分配到${task.name}的维修任务。`, 'info');
+        UI.showToast(`${resident.name} 已分配维修任务`, 'success');
+        GameState.save();
+        return true;
+    },
+
+    removeWorkerFromRepair(taskId, residentId) {
+        const state = GameState.getState();
+        const task = state.repairQueue.find(t => t.id === taskId);
+        
+        if (!task) return false;
+        const idx = task.assignedWorkers.indexOf(residentId);
+        if (idx === -1) return false;
+
+        task.assignedWorkers.splice(idx, 1);
+        GameState.save();
+        return true;
+    },
+
+    processRepairQueue() {
+        const state = GameState.getState();
+        const completedTasks = [];
+
+        for (let i = state.repairQueue.length - 1; i >= 0; i--) {
+            const task = state.repairQueue[i];
+            let dailyProgress = 0;
+
+            task.assignedWorkers.forEach(resId => {
+                const worker = state.residents.find(r => r.id === resId);
+                if (worker && worker.status === 'healthy' && !worker.onMission) {
+                    let workerProgress = 10 + worker.skills.build * 0.3;
+                    if (worker.traits.includes('mechanic')) workerProgress *= 1.5;
+                    if (worker.traits.includes('hardworking')) workerProgress *= 1.2;
+                    if (worker.job === 'builder') workerProgress *= 1.3;
+                    workerProgress *= ResidentSystem.getResidentEffectiveness(worker, 'build');
+                    dailyProgress += workerProgress;
+                    
+                    if (!state.stats.residentContributions[worker.id]) {
+                        state.stats.residentContributions[worker.id] = { repairs: 0, production: 0, explorations: 0 };
+                    }
+                    state.stats.residentContributions[worker.id].repairs += workerProgress;
+                }
+            });
+
+            task.progress = Math.min(task.maxProgress, task.progress + dailyProgress);
+
+            if (task.progress >= task.maxProgress) {
+                this.completeRepair(task);
+                completedTasks.push(task);
+                state.repairQueue.splice(i, 1);
+            }
+        }
+
+        if (completedTasks.length > 0) {
+            GameState.save();
+        }
+        return completedTasks;
+    },
+
+    completeRepair(task) {
+        const state = GameState.getState();
+
+        if (task.targetType === 'room') {
+            const room = this.findRoom(task.targetId);
+            if (room) {
+                room.health = 100;
+                const roomData = GameData.rooms.find(r => r.id === room.type);
+                GameState.addLog(`${roomData ? roomData.name : '房间'}维修完成！`, 'success');
+                UI.showToast(`${roomData ? roomData.name : '房间'}已修好`, 'success');
+            }
+        } else if (task.targetType === 'power') {
+            state.power.working = true;
+            GameState.addLog('电力系统维修完成！', 'success');
+            UI.showToast('电力系统已修复', 'success');
+        } else if (task.targetType === 'gate') {
+            state.gate.working = true;
+            state.gate.health = 100;
+            GameState.addLog('门禁系统维修完成！', 'success');
+            UI.showToast('门禁系统已修复', 'success');
+        }
+    },
+
+    getRepairQueue() {
+        const state = GameState.getState();
+        return state.repairQueue;
+    },
+
+    getAvailableRepairWorkers() {
+        const state = GameState.getState();
+        const busyWorkers = new Set();
+        state.repairQueue.forEach(t => t.assignedWorkers.forEach(w => busyWorkers.add(w)));
+        
+        return state.residents.filter(r => 
+            !busyWorkers.has(r.id) && 
+            !r.onMission && 
+            r.status === 'healthy' &&
+            (r.job === 'builder' || r.job === 'idle')
+        );
+    },
+
     buildRoom(roomType, floorNumber) {
         const state = GameState.getState();
         const check = this.canBuild(roomType, floorNumber);
@@ -160,6 +345,8 @@ const BuildingSystem = {
 
         GameState.removeResource('materials', 15);
         GameState.removeResource('parts', 5);
+        GameState.addResourceConsumed('materials', 15);
+        GameState.addResourceConsumed('parts', 5);
         
         const mechanics = GameState.getState().residents.filter(r => r.traits.includes('mechanic')).length;
         const repairBonus = mechanics > 0 ? 0.5 : 0;
@@ -167,6 +354,7 @@ const BuildingSystem = {
         state.power.working = true;
         GameState.addLog('电力系统已修复。', 'success');
         UI.showToast('电力系统修复完成', 'success');
+        GameState.save();
         return true;
     },
 

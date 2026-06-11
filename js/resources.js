@@ -42,7 +42,14 @@ const ResourceSystem = {
                 if (!roomData || !roomData.production) return;
                 if (room.health < 30) return;
 
-                const workers = state.residents.filter(r => r.assignedRoom === room.id && r.status === 'healthy');
+                const allWorkers = state.residents.filter(r => r.assignedRoom === room.id && r.status === 'healthy');
+                const workers = allWorkers.filter(w => ResidentSystem.isJobRoomMatch(w.job, room.type));
+                const mismatchedWorkers = allWorkers.length - workers.length;
+                
+                if (mismatchedWorkers > 0) {
+                    console.warn(`${roomData.name}有${mismatchedWorkers}名职业不匹配的工人，不会产生有效产出`);
+                }
+                
                 const workerCount = workers.length;
                 
                 if (workerCount === 0 && roomData.workers && roomData.workers > 0) return;

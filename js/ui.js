@@ -45,11 +45,18 @@ const UI = {
             btn.addEventListener('click', () => {
                 const type = btn.dataset.repair;
                 if (type === 'power') {
-                    BuildingSystem.repairPower();
+                    if (!GameState.getState().systems.power.broken) {
+                        this.showToast('电力系统运作正常，无需维修', 'info');
+                        return;
+                    }
+                    this.createRepairTaskForSystem('power');
                 } else if (type === 'gate') {
-                    BuildingSystem.repairGate();
+                    if (!GameState.getState().systems.gate.broken) {
+                        this.showToast('门禁系统运作正常，无需维修', 'info');
+                        return;
+                    }
+                    this.createRepairTaskForSystem('gate');
                 }
-                this.renderAll();
             });
         });
 
@@ -444,6 +451,12 @@ const UI = {
             return;
         }
 
+        if (!ResidentSystem.isJobRoomMatch(resident.job, room.type)) {
+            const job = ResidentSystem.getJob(resident.job);
+            this.showToast(`${resident.name}（${job ? job.name : '未知'}）与${roomData.name}职业不匹配！`, 'warning');
+            GameState.addLog(`${resident.name}（${job ? job.name : '未知'}）被分配到不匹配的${roomData.name}，将不会产生有效产出。`, 'warning');
+        }
+
         resident.assignedRoom = roomId;
         GameState.addLog(`${resident.name} 被分配到${roomData.name}工作。`);
         this.showToast(`已分配到${roomData.name}`, 'success');
@@ -650,6 +663,91 @@ const UI = {
             </div>`;
         });
         buildOptions.innerHTML = buildHtml;
+
+        const repairQueueContainer = document.getElementById('repair-queue');
+        const repairQueue = BuildingSystem.getRepairQueue();
+        
+        if (repairQueue.length === 0) {
+            repairQueueContainer.innerHTML = '<p class="hint">暂无维修任务，点击房间详情或系统维修创建任务</p>';
+        } else {
+            let rqHtml = '';
+            repairQueue.forEach(task => {
+                const state = GameState.getState();
+                const assignedWorkers = task.assignedWorkers.map(id => state.residents.find(r => r.id === id)).filter(Boolean);
+                const availableWorkers = BuildingSystem.getAvailableRepairWorkers().filter(w => !task.assignedWorkers.includes(w.id));
+                let targetName = '';
+                if (task.targetType === 'power') targetName = '🔌 电力系统';
+                else if (task.targetType === 'gate') targetName = '🚪 门禁系统';
+                else if (task.targetType === 'room') {
+                    const room = BuildingSystem.findRoom(task.targetId);
+                    const roomData = room ? GameData.rooms.find(r => r.id === room.type) : null;
+                    targetName = room ? `${roomData?.icon || '🏠'} ${roomData?.name || '房间'}` : '未知房间';
+                }
+
+                rqHtml += `<div class="patient-card" style="margin-bottom: 10px;">
+                    <div class="patient-info">
+                        <div class="patient-name">${targetName}</div>
+                        <div class="patient-condition">进度: ${Math.floor(task.progress)}% / 100%</div>
+                        <div style="width: 100%; height: 6px; background: var(--bg-dark); border-radius: 3px; margin-top: 4px; overflow: hidden;">
+                            <div style="width: ${task.progress}%; height: 100%; background: var(--primary);"></div>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                            材料: ${task.materialsCost} | 零件: ${task.partsCost} | 工人: ${assignedWorkers.length}
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start;">
+                        ${assignedWorkers.map(w => `
+                            <div style="background: var(--bg-dark); padding: 3px 8px; border-radius: 4px; font-size: 11px; display: flex; align-items: center; gap: 3px;">
+                                ${w.avatar} ${w.name}
+                                <button class="btn" style="padding: 0 4px; font-size: 10px; margin-left: 3px;"
+                                        onclick="UI.removeWorkerFromRepair('${task.id}', '${w.id}')">✕</button>
+                            </div>
+                        `).join('')}
+                        ${availableWorkers.length > 0 ? `
+                            <select style="padding: 2px 4px; font-size: 11px;" id="add-repair-worker-${task.id}">
+                                <option value="">+ 添加工人</option>
+                                ${availableWorkers.map(w => `
+                                    <option value="${w.id}">${w.avatar} ${w.name} (${ResidentSystem.getJob(w.job).name})</option>
+                                `).join('')}
+                            </select>
+                            <button class="btn" style="padding: 2px 8px; font-size: 11px;"
+                                    onclick="UI.addWorkerToRepair('${task.id}')">确定</button>
+                        ` : ''}
+                        <button class="btn" style="padding: 2px 8px; font-size: 11px;"
+                                onclick="UI.cancelRepairTask('${task.id}')">取消任务</button>
+                    </div>
+                </div>`;
+            });
+            repairQueueContainer.innerHTML = rqHtml;
+        }
+    },
+
+    addWorkerToRepair(taskId) {
+        const select = document.getElementById(`add-repair-worker-${taskId}`);
+        if (!select || !select.value) return;
+        BuildingSystem.assignWorkerToRepair(taskId, select.value);
+        this.renderAll();
+    },
+
+    removeWorkerFromRepair(taskId, residentId) {
+        BuildingSystem.removeWorkerFromRepair(taskId, residentId);
+        this.renderAll();
+    },
+
+    cancelRepairTask(taskId) {
+        BuildingSystem.removeRepairTask(taskId);
+        this.renderAll();
+    },
+
+    createRepairTaskForRoom(roomId) {
+        BuildingSystem.addRepairTask('room', roomId, []);
+        this.hideModal();
+        this.renderAll();
+    },
+
+    createRepairTaskForSystem(systemType) {
+        BuildingSystem.addRepairTask(systemType, systemType, []);
+        this.renderAll();
     },
 
     getResourceName(type) {
@@ -810,7 +908,8 @@ const UI = {
         
         html += `
             <br>
-            <button class="btn" onclick="UI.repairRoom('${roomId}')">🔧 修复 (材料: ${Math.ceil((100 - room.health) / 10) * 2})</button>
+            <p style="font-size: 11px; color: var(--text-muted);">耐久度低于100%时可创建维修任务</p>
+            <button class="btn" onclick="UI.createRepairTaskForRoom('${roomId}')" style="${room.health < 100 ? '' : 'opacity: 0.5; cursor: not-allowed;'}">🔧 创建维修任务 (材料: ${Math.ceil((100 - room.health) / 10) * 2})</button>
         `;
         
         this.showModal(roomData.name, html);
@@ -834,15 +933,17 @@ const UI = {
         const state = GameState.getState();
         
         document.getElementById('med-level').textContent = '1';
-        document.getElementById('med-beds').textContent = ResourceSystem.getMedicalBeds();
-        document.getElementById('med-quarantine').textContent = ResourceSystem.getQuarantineBeds();
+        document.getElementById('med-beds').textContent = `${MedicalSystem.getMedicalBedsUsed()}/${ResourceSystem.getMedicalBeds()}`;
+        document.getElementById('med-quarantine').textContent = `${MedicalSystem.getQuarantineBedsUsed()}/${ResourceSystem.getQuarantineBeds()}`;
         document.getElementById('med-doctors').textContent = MedicalSystem.getDoctors().length;
 
+        const medBeds = ResourceSystem.getMedicalBeds();
+        const medUsed = MedicalSystem.getMedicalBedsUsed();
         const quarantineBeds = ResourceSystem.getQuarantineBeds();
         const quarantinedCount = MedicalSystem.getQuarantined().length;
 
         const patientList = document.getElementById('patient-list');
-        const patients = MedicalSystem.getPatients().filter(p => !p.quarantined);
+        const patients = MedicalSystem.getPatients().filter(p => !p.quarantined && !p.hospitalized);
         
         if (patients.length === 0) {
             patientList.innerHTML = '<p class="hint">暂无病患</p>';
@@ -853,20 +954,42 @@ const UI = {
                 let actions = '';
                 
                 if (patient.status === 'sick') {
-                    condition = '生病 - ' + (patient.sickType || '流感');
-                    actions = `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x2)</button>`;
+                    const disease = ResidentSystem.getDisease(patient.sickType);
+                    const severityName = ResidentSystem.getSeverityName(patient.sickSeverity);
+                    const infectious = disease?.infectious ? '⚠️ 传染' : '';
+                    condition = `${disease?.name || '疾病'}（${severityName}）${infectious}`;
+                    const medCost = patient.sickSeverity === 'critical' ? 5 : patient.sickSeverity === 'severe' ? 3 : 2;
+                    actions = `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x${medCost})</button>`;
                     
-                    if (!patient.quarantined) {
+                    if (patient.treatmentProgress > 0) {
+                        actions += `<div style="flex-basis: 100%; font-size: 11px; color: var(--text-muted);">治疗进度: ${Math.floor(patient.treatmentProgress)}%</div>`;
+                    }
+
+                    if (!patient.quarantined && disease?.infectious) {
                         const canQuarantine = quarantinedCount < quarantineBeds;
-                        actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; ${canQuarantine ? '' : 'opacity: 0.5; cursor: not-allowed;'}" 
+                        actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px; ${canQuarantine ? '' : 'opacity: 0.5; cursor: not-allowed;'}" 
                                     onclick="${canQuarantine ? `UI.quarantine('${patient.id}')` : ''}">
                             ${canQuarantine ? '送隔离' : '隔离满'}
                         </button>`;
                     }
+
+                    const canHospitalize = medUsed < medBeds;
+                    actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; ${canHospitalize ? '' : 'opacity: 0.5; cursor: not-allowed;'}" 
+                                onclick="${canHospitalize ? `UI.hospitalize('${patient.id}')` : ''}">
+                        ${canHospitalize ? '送医疗室' : '病床满'}
+                    </button>`;
                 }
                 if (patient.injured) {
-                    condition = condition ? condition + ' / 受伤' : '受伤';
+                    const injText = patient.injurySeverity > 50 ? '重伤' : patient.injurySeverity > 20 ? '轻伤' : '微伤';
+                    condition = condition ? condition + ' / ' + injText + `(${Math.floor(patient.injurySeverity)}%)` : injText + `(${Math.floor(patient.injurySeverity)}%)`;
                     actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatInjury('${patient.id}')">治伤</button>`;
+                    if (!patient.hospitalized && patient.injurySeverity > 30) {
+                        const canHospitalize = medUsed < medBeds;
+                        actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-left: 5px; ${canHospitalize ? '' : 'opacity: 0.5; cursor: not-allowed;'}" 
+                                    onclick="${canHospitalize ? `UI.hospitalize('${patient.id}')` : ''}">
+                            ${canHospitalize ? '送医疗室' : '病床满'}
+                        </button>`;
+                    }
                 }
                 
                 html += `<div class="patient-card">
@@ -882,6 +1005,47 @@ const UI = {
             patientList.innerHTML = html;
         }
 
+        const medRoomList = document.getElementById('medical-room-list');
+        const hospitalized = MedicalSystem.getHospitalized();
+        if (medRoomList) {
+            if (hospitalized.length === 0) {
+                medRoomList.innerHTML = `<p class="hint">医疗室为空 (${medUsed}/${medBeds}床位)</p>`;
+            } else {
+                let html = `<p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">医疗床位: ${medUsed}/${medBeds}</p>`;
+                hospitalized.forEach(patient => {
+                    let condition = '';
+                    let actions = '';
+                    
+                    if (patient.status === 'sick') {
+                        const disease = ResidentSystem.getDisease(patient.sickType);
+                        const severityName = ResidentSystem.getSeverityName(patient.sickSeverity);
+                        condition = `${disease?.name || '疾病'}（${severityName}）`;
+                        const medCost = patient.sickSeverity === 'critical' ? 5 : patient.sickSeverity === 'severe' ? 3 : 2;
+                        actions = `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x${medCost})</button>`;
+                        if (patient.treatmentProgress > 0) {
+                            actions += `<div style="flex-basis: 100%; font-size: 11px; color: var(--primary);">治疗进度: ${Math.floor(patient.treatmentProgress)}%</div>`;
+                        }
+                    }
+                    if (patient.injured) {
+                        condition = condition ? condition + ' / 受伤' + `(${Math.floor(patient.injurySeverity)}%)` : '受伤' + `(${Math.floor(patient.injurySeverity)}%)`;
+                        actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatInjury('${patient.id}')">治伤</button>`;
+                    }
+                    actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-left: 5px;" onclick="UI.dischargeFromHospital('${patient.id}')">离开医疗室</button>`;
+                    
+                    html += `<div class="patient-card">
+                        <div class="patient-info">
+                            <div class="patient-name">${patient.avatar} ${patient.name} 🏥</div>
+                            <div class="patient-condition">住院治疗 - ${condition}</div>
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                            ${actions}
+                        </div>
+                    </div>`;
+                });
+                medRoomList.innerHTML = html;
+            }
+        }
+
         const quarantineList = document.getElementById('quarantine-list');
         const quarantined = MedicalSystem.getQuarantined();
         
@@ -891,22 +1055,46 @@ const UI = {
             let html = `<p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">隔离床位: ${quarantinedCount}/${quarantineBeds}</p>`;
             quarantined.forEach(patient => {
                 let condition = '';
-                if (patient.status === 'sick') condition = '生病 - ' + (patient.sickType || '流感');
-                if (patient.injured) condition = condition ? condition + ' / 受伤' : '受伤';
+                let actions = '';
+                if (patient.status === 'sick') {
+                    const disease = ResidentSystem.getDisease(patient.sickType);
+                    const severityName = ResidentSystem.getSeverityName(patient.sickSeverity);
+                    condition = `${disease?.name || '疾病'}（${severityName}）`;
+                    const medCost = patient.sickSeverity === 'critical' ? 5 : patient.sickSeverity === 'severe' ? 3 : 2;
+                    actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x${medCost})</button>`;
+                    if (patient.treatmentProgress > 0) {
+                        actions += `<div style="flex-basis: 100%; font-size: 11px; color: var(--primary);">治疗进度: ${Math.floor(patient.treatmentProgress)}%</div>`;
+                    }
+                }
+                if (patient.injured) {
+                    condition = condition ? condition + ' / 受伤' : '受伤';
+                    actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px;" onclick="UI.treatInjury('${patient.id}')">治伤</button>`;
+                }
+                actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.unquarantine('${patient.id}')">解除隔离</button>`;
                 
                 html += `<div class="patient-card">
                     <div class="patient-info">
-                        <div class="patient-name">${patient.avatar} ${patient.name}</div>
+                        <div class="patient-name">${patient.avatar} ${patient.name} ⚠️</div>
                         <div class="patient-condition">隔离中 - ${condition}</div>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.unquarantine('${patient.id}')">解除隔离</button>
-                        ${patient.status === 'sick' ? `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x2)</button>` : ''}
-                        ${patient.injured ? `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatInjury('${patient.id}')">治伤</button>` : ''}
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                        ${actions}
                     </div>
                 </div>`;
             });
             quarantineList.innerHTML = html;
+        }
+    },
+
+    hospitalize(residentId) {
+        if (MedicalSystem.hospitalize(residentId)) {
+            this.renderAll();
+        }
+    },
+
+    dischargeFromHospital(residentId) {
+        if (MedicalSystem.dischargeFromHospital(residentId)) {
+            this.renderAll();
         }
     },
 
@@ -1010,8 +1198,28 @@ const UI = {
         });
         achievementsList.innerHTML = html;
 
-        const nightmareUnlocked = state.achievements.includes('hard_mode');
-        document.querySelector('[data-diff="nightmare"]').classList.toggle('locked', !nightmareUnlocked);
+        document.querySelector('[data-diff="hard"]').classList.toggle('locked', !GameState.isDifficultyUnlocked('hard'));
+        document.querySelector('[data-diff="nightmare"]').classList.toggle('locked', !GameState.isDifficultyUnlocked('nightmare'));
+
+        const highScores = GameState.getHighScores();
+        const highScoresList = document.getElementById('high-scores-list');
+        if (highScores.length === 0) {
+            highScoresList.innerHTML = '<p class="hint">暂无历史记录</p>';
+        } else {
+            let hsHtml = '';
+            highScores.slice(0, 5).forEach((score, idx) => {
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+                const diffMap = { easy: '简单', normal: '普通', hard: '困难', nightmare: '噩梦' };
+                hsHtml += `<div class="achievement-item">
+                    <div class="achievement-icon">${medal}</div>
+                    <div>
+                        <div class="achievement-name">${diffMap[score.difficulty] || score.difficulty} - ${score.days}天</div>
+                        <div class="achievement-desc">${score.population}人存活 · ${score.score}分 · ${score.ending || '未完成结局'}</div>
+                    </div>
+                </div>`;
+            });
+            highScoresList.innerHTML = hsHtml;
+        }
     },
 
     showModal(title, body, footer = '') {

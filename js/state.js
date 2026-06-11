@@ -6,7 +6,18 @@ const GameState = {
         try {
             const data = localStorage.getItem(this.globalDataKey);
             if (data) {
-                return JSON.parse(data);
+                const parsed = JSON.parse(data);
+                if (!parsed.achievements) parsed.achievements = [];
+                if (!parsed.unlockedDifficulties) parsed.unlockedDifficulties = ['easy', 'normal', 'hard'];
+                if (!parsed.highScores) parsed.highScores = [];
+                if (!Array.isArray(parsed.highScores)) {
+                    const arr = [];
+                    for (const [endingId, score] of Object.entries(parsed.highScores)) {
+                        arr.push({ ...score, ending: endingId });
+                    }
+                    parsed.highScores = arr.sort((a, b) => b.days - a.days);
+                }
+                return parsed;
             }
         } catch (e) {
             console.error('读取全局数据失败:', e);
@@ -14,7 +25,7 @@ const GameState = {
         return {
             achievements: [],
             unlockedDifficulties: ['easy', 'normal', 'hard'],
-            highScores: {}
+            highScores: []
         };
     },
 
@@ -50,6 +61,37 @@ const GameState = {
     isDifficultyUnlocked(difficulty) {
         const globalData = this.getGlobalData();
         return globalData.unlockedDifficulties.includes(difficulty);
+    },
+
+    updateHighScore(ending, days, population, score, difficulty) {
+        const globalData = this.getGlobalData();
+        if (!globalData.highScores || !Array.isArray(globalData.highScores)) {
+            globalData.highScores = [];
+        }
+
+        globalData.highScores.push({
+            ending: ending,
+            days: days,
+            population: population,
+            score: score,
+            difficulty: difficulty,
+            date: new Date().toISOString()
+        });
+
+        globalData.highScores.sort((a, b) => b.score - a.score);
+        globalData.highScores = globalData.highScores.slice(0, 20);
+        this.saveGlobalData(globalData);
+        return true;
+    },
+
+    getHighScores() {
+        const globalData = this.getGlobalData();
+        return globalData.highScores || [];
+    },
+
+    getBestGame() {
+        const highScores = this.getHighScores();
+        return highScores.length > 0 ? highScores[0] : null;
     },
 
     init(difficulty = 'normal') {
@@ -93,12 +135,35 @@ const GameState = {
                 history: []
             },
             missions: [],
+            repairQueue: [],
             stats: {
                 totalJoined: 0,
                 totalDeaths: 0,
                 totalExplorations: 0,
                 totalRoomsBuilt: 0,
-                totalHealed: 0
+                totalHealed: 0,
+                totalProduced: {
+                    food: 0,
+                    water: 0,
+                    materials: 0,
+                    parts: 0
+                },
+                totalConsumed: {
+                    food: 0,
+                    water: 0,
+                    medicine: 0,
+                    materials: 0,
+                    parts: 0
+                },
+                totalSickDeaths: 0,
+                totalExplorationGains: {
+                    food: 0,
+                    water: 0,
+                    medicine: 0,
+                    materials: 0,
+                    parts: 0
+                },
+                residentContributions: {}
             },
             achievements: [...globalData.achievements],
             gameOver: false,
@@ -211,6 +276,29 @@ const GameState = {
 
     hasResource(type, amount) {
         return (this.state.resources[type] || 0) >= amount;
+    },
+
+    addResourceProduced(type, amount) {
+        if (!this.state.stats.totalProduced) return;
+        this.state.stats.totalProduced[type] = (this.state.stats.totalProduced[type] || 0) + amount;
+    },
+
+    addResourceConsumed(type, amount) {
+        if (!this.state.stats.totalConsumed) return;
+        this.state.stats.totalConsumed[type] = (this.state.stats.totalConsumed[type] || 0) + amount;
+    },
+
+    addExplorationGain(type, amount) {
+        if (!this.state.stats.totalExplorationGains) return;
+        this.state.stats.totalExplorationGains[type] = (this.state.stats.totalExplorationGains[type] || 0) + amount;
+    },
+
+    addResidentContribution(residentId, type, amount) {
+        if (!this.state.stats.residentContributions) return;
+        if (!this.state.stats.residentContributions[residentId]) {
+            this.state.stats.residentContributions[residentId] = { repairs: 0, production: 0, explorations: 0 };
+        }
+        this.state.stats.residentContributions[residentId][type] = (this.state.stats.residentContributions[residentId][type] || 0) + amount;
     },
 
     addMorale(amount) {
@@ -344,12 +432,55 @@ const GameState = {
             const saved = localStorage.getItem('shelter_save');
             if (saved) {
                 this.state = JSON.parse(saved);
+                this.migrateState(this.state);
                 return true;
             }
         } catch (e) {
             console.error('加载失败:', e);
         }
         return false;
+    },
+
+    migrateState(state) {
+        if (!state.repairQueue) state.repairQueue = [];
+        if (!state.missions) state.missions = [];
+        if (!state.log) state.log = [];
+        if (!state.achievements) state.achievements = [];
+        if (typeof state.gameOver === 'undefined') state.gameOver = false;
+        if (!state.ending) state.ending = null;
+        if (!state.policies) state.policies = { curfew: false, ration: 'normal', foreignPolicy: 'neutral' };
+        if (!state.events) state.events = { pending: [], history: [] };
+        if (!state.power) state.power = { working: true, level: 1, output: 5 };
+        if (!state.gate) state.gate = { working: true, health: 100 };
+        if (!state.morale) state.morale = 75;
+
+        if (!state.stats) state.stats = {};
+        const s = state.stats;
+        if (!s.totalJoined) s.totalJoined = 0;
+        if (!s.totalDeaths) s.totalDeaths = 0;
+        if (!s.totalExplorations) s.totalExplorations = 0;
+        if (!s.totalRoomsBuilt) s.totalRoomsBuilt = 0;
+        if (!s.totalHealed) s.totalHealed = 0;
+        if (!s.totalSickDeaths) s.totalSickDeaths = 0;
+        if (!s.totalProduced) s.totalProduced = { food: 0, water: 0, materials: 0, parts: 0 };
+        if (!s.totalConsumed) s.totalConsumed = { food: 0, water: 0, medicine: 0, materials: 0, parts: 0 };
+        if (!s.totalExplorationGains) s.totalExplorationGains = { food: 0, water: 0, medicine: 0, materials: 0, parts: 0 };
+        if (!s.residentContributions) s.residentContributions = {};
+
+        state.residents.forEach(r => {
+            if (!r.traits) r.traits = [];
+            if (!r.skills) r.skills = { combat: 30, medical: 20, build: 30, scavenge: 30, farming: 20, research: 20 };
+            if (typeof r.sickSeverity === 'undefined') r.sickSeverity = 'mild';
+            if (typeof r.treatmentProgress === 'undefined') r.treatmentProgress = 0;
+            if (typeof r.quarantined === 'undefined') r.quarantined = false;
+            if (typeof r.hospitalized === 'undefined') r.hospitalized = false;
+            if (typeof r.injurySeverity === 'undefined') r.injurySeverity = r.injured ? 30 : 0;
+            if (typeof r.injured === 'undefined') r.injured = false;
+            if (typeof r.onMission === 'undefined') r.onMission = false;
+            if (typeof r.assignedRoom === 'undefined') r.assignedRoom = null;
+            if (typeof r.daysInShelter === 'undefined') r.daysInShelter = 0;
+            if (typeof r.stamina === 'undefined') r.stamina = 100;
+        });
     },
 
     reset() {

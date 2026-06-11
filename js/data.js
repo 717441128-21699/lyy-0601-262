@@ -4,6 +4,45 @@ const GameData = {
         lastNames: ['伟', '芳', '娜', '敏', '静', '强', '磊', '军', '洋', '勇', '艳', '杰', '娟', '涛', '明', '超', '秀英', '华', '丽', '刚']
     },
 
+    diseases: [
+        { 
+            id: 'flu', 
+            name: '普通流感', 
+            severity: 'mild', 
+            infectious: true, 
+            baseHealDays: 5,
+            damagePerDay: 2,
+            desc: '轻症，传染性一般，治疗较容易'
+        },
+        { 
+            id: 'pneumonia', 
+            name: '肺炎', 
+            severity: 'severe', 
+            infectious: true, 
+            baseHealDays: 10,
+            damagePerDay: 5,
+            desc: '重症，具有传染性，需要隔离治疗'
+        },
+        { 
+            id: 'infection', 
+            name: '伤口感染', 
+            severity: 'moderate', 
+            infectious: false, 
+            baseHealDays: 7,
+            damagePerDay: 3,
+            desc: '中症，不传染，需要抗生素治疗'
+        },
+        { 
+            id: 'plague', 
+            name: '烈性瘟疫', 
+            severity: 'critical', 
+            infectious: true, 
+            baseHealDays: 14,
+            damagePerDay: 8,
+            desc: '危重症，高传染性，必须立即隔离！'
+        }
+    ],
+
     traits: [
         { id: 'strong', name: '强壮', desc: '战斗力+20%，探索效率+10%', type: 'physical', effect: { combat: 0.2, explore: 0.1 } },
         { id: 'smart', name: '聪明', desc: '研究效率+30%，医疗能力+20%', type: 'mental', effect: { research: 0.3, medical: 0.2 } },

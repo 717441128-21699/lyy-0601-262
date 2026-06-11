@@ -1,6 +1,25 @@
 const ResidentSystem = {
     residentIdCounter: 1,
 
+    jobRoomMapping: {
+        farmer: ['farm'],
+        water_worker: ['water_plant'],
+        builder: ['workshop', 'power_room'],
+        doctor: ['medical_room'],
+        guard: ['guard_post'],
+        chef: ['canteen'],
+        scientist: ['lab']
+    },
+
+    getSuitableRoomsForJob(jobId) {
+        return this.jobRoomMapping[jobId] || [];
+    },
+
+    isJobRoomMatch(jobId, roomType) {
+        const suitable = this.getSuitableRoomsForJob(jobId);
+        return suitable.length === 0 || suitable.includes(roomType);
+    },
+
     generateRandomResident() {
         const state = GameState.getState();
         const name = this.generateName();
@@ -32,7 +51,11 @@ const ResidentSystem = {
             job: 'idle',
             status: 'healthy',
             sickType: null,
+            sickSeverity: null,
             sickDays: 0,
+            treatmentProgress: 0,
+            quarantined: false,
+            hospitalized: false,
             injured: false,
             injurySeverity: 0,
             assignedRoom: null,
@@ -90,10 +113,33 @@ const ResidentSystem = {
                 resident.assignedRoom = null;
                 GameState.addLog(`${resident.name} 的房间分配已取消。`);
             }
+        } else if (resident.assignedRoom) {
+            const room = BuildingSystem.findRoom(resident.assignedRoom);
+            if (room && !this.isJobRoomMatch(jobId, room.type)) {
+                const roomData = GameData.rooms.find(r => r.id === room.type);
+                resident.assignedRoom = null;
+                GameState.addLog(`${resident.name} 的职业变更为${this.getJob(jobId).name}，与${roomData ? roomData.name : '房间'}不匹配，房间分配已自动取消。`, 'warning');
+                UI.showToast(`${resident.name} 的房间分配已取消（职业不匹配`, 'info');
+            }
         }
         
         GameState.addLog(`${resident.name} 被分配为${this.getJob(jobId).name}。`);
+        GameState.save();
         return true;
+    },
+
+    getDisease(diseaseId) {
+        return GameData.diseases.find(d => d.id === diseaseId);
+    },
+
+    getSeverityName(severity) {
+        const names = {
+            mild: '轻症',
+            moderate: '中症',
+            severe: '重症',
+            critical: '危重症'
+        };
+        return names[severity] || '未知';
     },
 
     updateResidentDaily(resident) {
@@ -130,17 +176,24 @@ const ResidentSystem = {
 
         if (resident.status === 'sick') {
             resident.sickDays++;
-            resident.health -= 3;
+            const disease = this.getDisease(resident.sickType);
+            const damage = disease ? disease.damagePerDay : 3;
+            resident.health -= damage;
             resident.morale -= 5;
             
-            if (!resident.quarantined && Math.random() < 0.05 && resident.sickDays > 3) {
+            const isInfectious = disease ? disease.infectious : true;
+            if (!resident.quarantined && isInfectious && Math.random() < 0.05 && resident.sickDays > 3) {
                 this.spreadDisease(resident);
             }
             
-            if (resident.sickDays > 7 && Math.random() < 0.3) {
+            const baseHealDays = disease ? disease.baseHealDays : 7;
+            if (resident.treatmentProgress >= 100 || (resident.sickDays > baseHealDays && Math.random() < 0.2)) {
                 this.recoverFromSickness(resident);
                 if (resident.quarantined) {
                     MedicalSystem.unquarantine(resident.id);
+                }
+                if (resident.hospitalized) {
+                    MedicalSystem.dischargeFromHospital(resident.id);
                 }
             }
         }
@@ -174,30 +227,53 @@ const ResidentSystem = {
 
     spreadDisease(sickResident) {
         const state = GameState.getState();
+        const disease = this.getDisease(sickResident.sickType);
         const healthyResidents = state.residents.filter(r => 
-            r.status === 'healthy' && !r.onMission && r.id !== sickResident.id
+            r.status === 'healthy' && !r.onMission && r.id !== sickResident.id && !r.quarantined
         );
         
         if (healthyResidents.length > 0) {
             const target = healthyResidents[Math.floor(Math.random() * healthyResidents.length)];
             this.makeSick(target, sickResident.sickType);
-            GameState.addLog(`${target.name} 被${sickResident.name}传染了！`, 'warning');
+            GameState.addLog(`${target.name} 被${sickResident.name}传染了${disease ? disease.name : '疾病'}！`, 'warning');
         }
     },
 
-    makeSick(resident, type = 'flu') {
+    makeSick(residentOrId, type = 'flu') {
+        const state = GameState.getState();
+        let resident;
+        if (typeof residentOrId === 'string') {
+            resident = state.residents.find(r => r.id === residentOrId);
+        } else {
+            resident = residentOrId;
+        }
+        if (!resident) return false;
+        if (!resident.traits) resident.traits = [];
+
+        const disease = this.getDisease(type);
         resident.status = 'sick';
         resident.sickType = type;
+        resident.sickSeverity = disease ? disease.severity : 'mild';
         resident.sickDays = 0;
+        resident.treatmentProgress = 0;
+        resident.hospitalized = false;
+        resident.quarantined = false;
         if (resident.traits.includes('sickly')) {
             resident.sickDays = -1;
         }
+        if (resident.assignedRoom) {
+            resident.assignedRoom = null;
+            GameState.addLog(`${resident.name} 生病了，工作分配已取消。`, 'info');
+        }
+        return true;
     },
 
     recoverFromSickness(resident) {
         resident.status = 'healthy';
         resident.sickType = null;
+        resident.sickSeverity = null;
         resident.sickDays = 0;
+        resident.treatmentProgress = 0;
         resident.health = Math.min(resident.maxHealth, resident.health + 20);
         GameState.addLog(`${resident.name} 从疾病中康复了。`, 'success');
     },
@@ -214,7 +290,18 @@ const ResidentSystem = {
     },
 
     die(resident) {
-        GameState.removeResident(resident.id, '死亡');
+        const state = GameState.getState();
+        const sickDeath = resident.status === 'sick';
+        if (sickDeath) {
+            state.stats.totalSickDeaths = (state.stats.totalSickDeaths || 0) + 1;
+        }
+        if (resident.quarantined) {
+            MedicalSystem.unquarantine(resident.id);
+        }
+        if (resident.hospitalized) {
+            MedicalSystem.dischargeFromHospital(resident.id);
+        }
+        GameState.removeResident(resident.id, sickDeath ? '病死' : '死亡');
     },
 
     getResidentEffectiveness(resident, skillType) {
