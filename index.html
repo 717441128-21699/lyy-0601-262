@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>末日避难楼 - 生存经营游戏</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <header id="top-bar">
+            <div class="game-title">🏚️ 末日避难楼</div>
+            <div class="day-info">
+                <span id="day-display">第 1 天</span>
+                <span id="time-display">早上</span>
+            </div>
+            <div class="resources-bar">
+                <div class="resource" title="食物">
+                    <span class="res-icon">🍖</span>
+                    <span id="res-food">50</span>
+                </div>
+                <div class="resource" title="水">
+                    <span class="res-icon">💧</span>
+                    <span id="res-water">50</span>
+                </div>
+                <div class="resource" title="药品">
+                    <span class="res-icon">💊</span>
+                    <span id="res-medicine">20</span>
+                </div>
+                <div class="resource" title="材料">
+                    <span class="res-icon">🔧</span>
+                    <span id="res-materials">30</span>
+                </div>
+                <div class="resource" title="士气">
+                    <span class="res-icon">😊</span>
+                    <span id="res-morale">75</span>%
+                </div>
+            </div>
+            <div class="actions-bar">
+                <button id="btn-next-day" class="btn btn-primary">下一天 →</button>
+                <button id="btn-log" class="btn">📜 日志</button>
+                <button id="btn-settings" class="btn">⚙️</button>
+            </div>
+        </header>
+
+        <nav id="side-nav">
+            <button class="nav-btn active" data-view="overview">
+                <span class="nav-icon">🏢</span>
+                <span class="nav-text">楼层总览</span>
+            </button>
+            <button class="nav-btn" data-view="residents">
+                <span class="nav-icon">👥</span>
+                <span class="nav-text">居民名单</span>
+            </button>
+            <button class="nav-btn" data-view="warehouse">
+                <span class="nav-icon">📦</span>
+                <span class="nav-text">物资仓库</span>
+            </button>
+            <button class="nav-btn" data-view="exploration">
+                <span class="nav-icon">🗺️</span>
+                <span class="nav-text">探索派遣</span>
+            </button>
+            <button class="nav-btn" data-view="building">
+                <span class="nav-icon">🔨</span>
+                <span class="nav-text">建造维修</span>
+            </button>
+            <button class="nav-btn" data-view="medical">
+                <span class="nav-icon">🏥</span>
+                <span class="nav-text">医疗隔离</span>
+            </button>
+            <button class="nav-btn" data-view="events">
+                <span class="nav-icon">⚡</span>
+                <span class="nav-text">事件处理</span>
+                <span id="event-badge" class="badge hidden">!</span>
+            </button>
+            <button class="nav-btn" data-view="stats">
+                <span class="nav-icon">📊</span>
+                <span class="nav-text">结局统计</span>
+            </button>
+        </nav>
+
+        <main id="main-content">
+            <section id="view-overview" class="view active">
+                <h2>🏢 楼层总览</h2>
+                <div id="building-visual"></div>
+                <div class="info-cards">
+                    <div class="info-card">
+                        <h3>居民状态</h3>
+                        <p>总人口: <span id="stat-population">0</span></p>
+                        <p>健康: <span id="stat-healthy">0</span></p>
+                        <p>生病: <span id="stat-sick">0</span></p>
+                        <p>受伤: <span id="stat-injured">0</span></p>
+                    </div>
+                    <div class="info-card">
+                        <h3>设施状态</h3>
+                        <p>电力: <span id="stat-power">--</span></p>
+                        <p>门禁: <span id="stat-gate">--</span></p>
+                        <p>房间数: <span id="stat-rooms">0</span></p>
+                        <p>可用床位: <span id="stat-beds">0</span></p>
+                    </div>
+                    <div class="info-card">
+                        <h3>今日消耗</h3>
+                        <p>食物消耗: <span id="stat-food-use">0</span>/天</p>
+                        <p>水消耗: <span id="stat-water-use">0</span>/天</p>
+                        <p>预计可用: <span id="stat-days-left">--</span>天</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>管理政策</h3>
+                        <p>宵禁: <span id="stat-curfew">未开启</span> 
+                            <button class="btn btn-small" onclick="Game.toggleCurfew()" style="padding: 2px 8px; font-size: 10px; margin-left: 5px;">切换</button>
+                        </p>
+                        <p>配给制: 
+                            <select id="stat-ration-select" onchange="Game.setRation(this.value)" style="background: var(--bg-dark); color: var(--text-primary); border: 1px solid var(--border); border-radius: 3px; font-size: 11px; padding: 2px;">
+                                <option value="normal">正常</option>
+                                <option value="reduced">减配</option>
+                                <option value="starvation">最低</option>
+                            </select>
+                        </p>
+                        <p>对外政策: 
+                            <select id="stat-foreign-select" onchange="Game.setForeignPolicy(this.value)" style="background: var(--bg-dark); color: var(--text-primary); border: 1px solid var(--border); border-radius: 3px; font-size: 11px; padding: 2px;">
+                                <option value="friendly">友好</option>
+                                <option value="neutral">中立</option>
+                                <option value="hostile">敌对</option>
+                            </select>
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-residents" class="view">
+                <h2>👥 居民名单</h2>
+                <div class="residents-filters">
+                    <button class="filter-btn active" data-filter="all">全部</button>
+                    <button class="filter-btn" data-filter="healthy">健康</button>
+                    <button class="filter-btn" data-filter="sick">生病</button>
+                    <button class="filter-btn" data-filter="working">工作中</button>
+                    <button class="filter-btn" data-filter="idle">空闲</button>
+                </div>
+                <div id="residents-list" class="residents-grid"></div>
+                <div id="resident-detail" class="detail-panel hidden"></div>
+            </section>
+
+            <section id="view-warehouse" class="view">
+                <h2>📦 物资仓库</h2>
+                <div class="warehouse-sections">
+                    <div class="warehouse-section">
+                        <h3>基础物资</h3>
+                        <div class="resource-list">
+                            <div class="resource-item">
+                                <span class="res-icon-lg">🍖</span>
+                                <div class="res-info">
+                                    <span class="res-name">食物</span>
+                                    <span class="res-amount" id="wh-food">50</span>
+                                    <span class="res-desc">每人每天消耗1单位</span>
+                                </div>
+                            </div>
+                            <div class="resource-item">
+                                <span class="res-icon-lg">💧</span>
+                                <div class="res-info">
+                                    <span class="res-name">净水</span>
+                                    <span class="res-amount" id="wh-water">50</span>
+                                    <span class="res-desc">每人每天消耗1单位</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="warehouse-section">
+                        <h3>医疗物资</h3>
+                        <div class="resource-list">
+                            <div class="resource-item">
+                                <span class="res-icon-lg">💊</span>
+                                <div class="res-info">
+                                    <span class="res-name">药品</span>
+                                    <span class="res-amount" id="wh-medicine">20</span>
+                                    <span class="res-desc">治疗疾病和伤口</span>
+                                </div>
+                            </div>
+                            <div class="resource-item">
+                                <span class="res-icon-lg">🩹</span>
+                                <div class="res-info">
+                                    <span class="res-name">绷带</span>
+                                    <span class="res-amount" id="wh-bandage">15</span>
+                                    <span class="res-desc">处理外伤</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="warehouse-section">
+                        <h3>建造材料</h3>
+                        <div class="resource-list">
+                            <div class="resource-item">
+                                <span class="res-icon-lg">🔧</span>
+                                <div class="res-info">
+                                    <span class="res-name">材料</span>
+                                    <span class="res-amount" id="wh-materials">30</span>
+                                    <span class="res-desc">建造和维修使用</span>
+                                </div>
+                            </div>
+                            <div class="resource-item">
+                                <span class="res-icon-lg">⚡</span>
+                                <div class="res-info">
+                                    <span class="res-name">零件</span>
+                                    <span class="res-amount" id="wh-parts">10</span>
+                                    <span class="res-desc">修复电力和设备</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="warehouse-section">
+                        <h3>其他物资</h3>
+                        <div class="resource-list">
+                            <div class="resource-item">
+                                <span class="res-icon-lg">🎮</span>
+                                <div class="res-info">
+                                    <span class="res-name">娱乐品</span>
+                                    <span class="res-amount" id="wh-entertainment">5</span>
+                                    <span class="res-desc">提升士气</span>
+                                </div>
+                            </div>
+                            <div class="resource-item">
+                                <span class="res-icon-lg">📚</span>
+                                <div class="res-info">
+                                    <span class="res-name">书籍</span>
+                                    <span class="res-amount" id="wh-books">3</span>
+                                    <span class="res-desc">提升士气和学习</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-exploration" class="view">
+                <h2>🗺️ 探索派遣</h2>
+                <div class="exploration-layout">
+                    <div class="exploration-left">
+                        <h3>可选探索地点</h3>
+                        <div id="explore-locations" class="locations-list"></div>
+                    </div>
+                    <div class="exploration-right">
+                        <h3>派遣队伍</h3>
+                        <div id="explore-team" class="team-panel">
+                            <p class="hint">选择探索地点并派遣居民</p>
+                        </div>
+                        <h3>外出中的队伍</h3>
+                        <div id="explore-active" class="active-missions"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-building" class="view">
+                <h2>🔨 建造维修</h2>
+                <div class="building-layout">
+                    <div class="building-left">
+                        <h3>楼层状态</h3>
+                        <div id="floor-list" class="floor-status-list"></div>
+                    </div>
+                    <div class="building-right">
+                        <h3>可建造房间</h3>
+                        <div id="build-options" class="build-options-list"></div>
+                        <h3>系统维修</h3>
+                        <div class="repair-options">
+                            <button class="btn btn-repair" data-repair="power">
+                                🔌 修复电力系统
+                                <span class="cost">材料: 15, 零件: 5</span>
+                            </button>
+                            <button class="btn btn-repair" data-repair="gate">
+                                🚪 修复门禁系统
+                                <span class="cost">材料: 10, 零件: 3</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-medical" class="view">
+                <h2>🏥 医疗隔离</h2>
+                <div class="medical-layout">
+                    <div class="medical-left">
+                        <h3>医疗设施</h3>
+                        <div class="medical-status">
+                            <p>医疗室等级: <span id="med-level">1</span></p>
+                            <p>病床数: <span id="med-beds">2</span></p>
+                            <p>隔离区: <span id="med-quarantine">2</span>床</p>
+                            <p>医生数量: <span id="med-doctors">0</span></p>
+                        </div>
+                    </div>
+                    <div class="medical-right">
+                        <h3>病患列表</h3>
+                        <div id="patient-list" class="patient-list"></div>
+                        <h3>隔离区</h3>
+                        <div id="quarantine-list" class="quarantine-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-events" class="view">
+                <h2>⚡ 事件处理</h2>
+                <div id="current-events" class="events-list">
+                    <p class="hint">暂无待处理事件</p>
+                </div>
+                <div class="event-history">
+                    <h3>历史事件</h3>
+                    <div id="event-log" class="event-log-list"></div>
+                </div>
+            </section>
+
+            <section id="view-stats" class="view">
+                <h2>📊 结局统计</h2>
+                <div class="stats-layout">
+                    <div class="stat-section">
+                        <h3>生存统计</h3>
+                        <div class="stat-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">存活天数</span>
+                                <span class="stat-value" id="stat-days">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">当前人口</span>
+                                <span class="stat-value" id="stat-cur-pop">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">累计接纳</span>
+                                <span class="stat-value" id="stat-total-join">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">死亡人数</span>
+                                <span class="stat-value" id="stat-deaths">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-section">
+                        <h3>成就解锁</h3>
+                        <div id="achievements-list" class="achievements-list"></div>
+                    </div>
+                    <div class="stat-section">
+                        <h3>难度选择</h3>
+                        <div class="difficulty-options">
+                            <button class="diff-btn" data-diff="easy">简单</button>
+                            <button class="diff-btn active" data-diff="normal">普通</button>
+                            <button class="diff-btn" data-diff="hard">困难</button>
+                            <button class="diff-btn locked" data-diff="nightmare">噩梦 🔒</button>
+                        </div>
+                        <button id="btn-restart" class="btn btn-danger">重新开始</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div id="modal" class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">标题</h3>
+                <button id="modal-close" class="modal-close">✕</button>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+            <div id="modal-footer" class="modal-footer"></div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/residents.js"></script>
+    <script src="js/resources.js"></script>
+    <script src="js/building.js"></script>
+    <script src="js/exploration.js"></script>
+    <script src="js/medical.js"></script>
+    <script src="js/events.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
