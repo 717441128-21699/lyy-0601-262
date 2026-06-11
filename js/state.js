@@ -155,7 +155,9 @@ const GameState = {
                     materials: 0,
                     parts: 0
                 },
+                totalNormalDeaths: 0,
                 totalSickDeaths: 0,
+                totalExplorationDeaths: 0,
                 totalExplorationGains: {
                     food: 0,
                     water: 0,
@@ -250,13 +252,20 @@ const GameState = {
         this.addLog(`${resident.name} 加入了避难楼。`);
     },
 
-    removeResident(residentId, reason = '离开') {
+    removeResident(residentId, reason = '离开', deathType = null) {
         const index = this.state.residents.findIndex(r => r.id === residentId);
         if (index !== -1) {
             const resident = this.state.residents[index];
             this.state.residents.splice(index, 1);
-            if (reason === '死亡') {
+            if (reason === '死亡' || reason === '病死' || reason === '牺牲') {
                 this.state.stats.totalDeaths++;
+                if (deathType === 'sick' || reason === '病死') {
+                    this.state.stats.totalSickDeaths = (this.state.stats.totalSickDeaths || 0) + 1;
+                } else if (deathType === 'exploration' || reason === '牺牲') {
+                    this.state.stats.totalExplorationDeaths = (this.state.stats.totalExplorationDeaths || 0) + 1;
+                } else {
+                    this.state.stats.totalNormalDeaths = (this.state.stats.totalNormalDeaths || 0) + 1;
+                }
             }
             this.addLog(`${resident.name} ${reason}了。`);
         }
@@ -461,7 +470,9 @@ const GameState = {
         if (!s.totalExplorations) s.totalExplorations = 0;
         if (!s.totalRoomsBuilt) s.totalRoomsBuilt = 0;
         if (!s.totalHealed) s.totalHealed = 0;
+        if (!s.totalNormalDeaths) s.totalNormalDeaths = 0;
         if (!s.totalSickDeaths) s.totalSickDeaths = 0;
+        if (!s.totalExplorationDeaths) s.totalExplorationDeaths = 0;
         if (!s.totalProduced) s.totalProduced = { food: 0, water: 0, materials: 0, parts: 0 };
         if (!s.totalConsumed) s.totalConsumed = { food: 0, water: 0, medicine: 0, materials: 0, parts: 0 };
         if (!s.totalExplorationGains) s.totalExplorationGains = { food: 0, water: 0, medicine: 0, materials: 0, parts: 0 };
@@ -480,6 +491,7 @@ const GameState = {
             if (typeof r.assignedRoom === 'undefined') r.assignedRoom = null;
             if (typeof r.daysInShelter === 'undefined') r.daysInShelter = 0;
             if (typeof r.stamina === 'undefined') r.stamina = 100;
+            if (typeof r.shift === 'undefined') r.shift = 'none';
         });
     },
 

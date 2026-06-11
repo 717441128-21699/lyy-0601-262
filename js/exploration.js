@@ -137,7 +137,7 @@ const ExplorationSystem = {
                 const deadId = mission.team[deadIdx];
                 const resident = state.residents.find(r => r.id === deadId);
                 if (resident) {
-                    ResidentSystem.die(resident);
+                    ResidentSystem.die(resident, 'exploration');
                     GameState.addLog(`${resident.name} 在探索中牺牲了...`, 'danger');
                 }
             }

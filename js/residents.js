@@ -1,6 +1,12 @@
 const ResidentSystem = {
     residentIdCounter: 1,
 
+    shifts: {
+        none: { id: 'none', name: '无固定班次', icon: '🌓' },
+        morning: { id: 'morning', name: '早班 (8:00-20:00)', icon: '☀️' },
+        night: { id: 'night', name: '夜班 (20:00-8:00)', icon: '🌙' }
+    },
+
     jobRoomMapping: {
         farmer: ['farm'],
         water_worker: ['water_plant'],
@@ -61,6 +67,7 @@ const ResidentSystem = {
             assignedRoom: null,
             onMission: false,
             daysInShelter: 0,
+            shift: 'none',
             skills: {
                 combat: Math.floor(Math.random() * 50) + 20,
                 medical: Math.floor(Math.random() * 40) + 10,
@@ -98,6 +105,23 @@ const ResidentSystem = {
 
     getJob(jobId) {
         return GameData.jobs.find(j => j.id === jobId);
+    },
+
+    getShift(shiftId) {
+        return this.shifts[shiftId] || this.shifts.none;
+    },
+
+    assignShift(residentId, shiftId) {
+        const state = GameState.getState();
+        const resident = state.residents.find(r => r.id === residentId);
+        if (!resident) return false;
+        if (!this.shifts[shiftId]) return false;
+
+        resident.shift = shiftId;
+        const shift = this.getShift(shiftId);
+        GameState.addLog(`${resident.name} 的班次已调整为${shift.name}。`);
+        GameState.save();
+        return true;
     },
 
     assignJob(residentId, jobId) {
@@ -289,19 +313,20 @@ const ResidentSystem = {
         resident.injurySeverity = 0;
     },
 
-    die(resident) {
-        const state = GameState.getState();
-        const sickDeath = resident.status === 'sick';
-        if (sickDeath) {
-            state.stats.totalSickDeaths = (state.stats.totalSickDeaths || 0) + 1;
-        }
+    die(resident, deathType = null) {
         if (resident.quarantined) {
             MedicalSystem.unquarantine(resident.id);
         }
         if (resident.hospitalized) {
             MedicalSystem.dischargeFromHospital(resident.id);
         }
-        GameState.removeResident(resident.id, sickDeath ? '病死' : '死亡');
+        if (!deathType) {
+            deathType = resident.status === 'sick' ? 'sick' : 'normal';
+        }
+        let reason = '死亡';
+        if (deathType === 'sick') reason = '病死';
+        else if (deathType === 'exploration') reason = '牺牲';
+        GameState.removeResident(resident.id, reason, deathType);
     },
 
     getResidentEffectiveness(resident, skillType) {
@@ -312,6 +337,18 @@ const ResidentSystem = {
         if (resident.stamina < 30) effectiveness *= 0.6;
         if (resident.status === 'sick') effectiveness *= 0.4;
         if (resident.injured) effectiveness *= 0.5;
+        
+        if (resident.shift === 'morning' || resident.shift === 'night') {
+            if (resident.job === 'guard' && resident.shift === 'night') {
+                effectiveness *= 1.3;
+            } else if (resident.job === 'builder' && resident.shift === 'night') {
+                effectiveness *= 0.7;
+            } else if (resident.job === 'doctor' && resident.shift === 'night') {
+                effectiveness *= 0.8;
+            } else {
+                effectiveness *= 1.1;
+            }
+        }
         
         if (resident.traits.includes('hardworking')) effectiveness *= 1.25;
         if (resident.traits.includes('strong') && (skillType === 'combat' || skillType === 'build')) {

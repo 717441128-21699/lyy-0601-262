@@ -272,7 +272,7 @@ const UI = {
                     <div class="resident-avatar">${resident.avatar}</div>
                     <div>
                         <div class="resident-name">${resident.name}</div>
-                        <div class="resident-job">${job ? job.icon + ' ' + job.name : '空闲'}</div>
+                        <div class="resident-job">${job ? job.icon + ' ' + job.name : '空闲'} ${ResidentSystem.getShift(resident.shift).icon}</div>
                     </div>
                 </div>
                 <div class="resident-stats">
@@ -352,6 +352,22 @@ const UI = {
                 `).join('')}
             </select>
             ${this.getRoomAssignmentUI(resident)}
+            <br><br>
+            <h4>班次安排</h4>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">早班/夜班影响不同职业的工作效率：</p>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.6;">
+                • 守卫夜班效率 +30%<br>
+                • 建筑工夜班效率 -30%<br>
+                • 医生夜班效率 -20%<br>
+                • 其他固定班次效率 +10%
+            </div>
+            <select id="shift-select" onchange="UI.changeResidentShift('${resident.id}', this.value)" style="width: 100%; padding: 8px; margin-bottom: 10px;">
+                ${Object.values(ResidentSystem.shifts).map(s => `
+                    <option value="${s.id}" ${resident.shift === s.id ? 'selected' : ''}>
+                        ${s.icon} ${s.name}
+                    </option>
+                `).join('')}
+            </select>
             <br><br>
             <button class="btn" onclick="document.getElementById('resident-detail').classList.add('hidden')">关闭</button>
         `;
@@ -479,6 +495,12 @@ const UI = {
 
     changeResidentJob(residentId, jobId) {
         ResidentSystem.assignJob(residentId, jobId);
+        this.showResidentDetail(residentId);
+        this.renderAll();
+    },
+
+    changeResidentShift(residentId, shiftId) {
+        ResidentSystem.assignShift(residentId, shiftId);
         this.showResidentDetail(residentId);
         this.renderAll();
     },
@@ -684,15 +706,20 @@ const UI = {
                     targetName = room ? `${roomData?.icon || '🏠'} ${roomData?.name || '房间'}` : '未知房间';
                 }
 
+                const progressPercent = Math.floor((task.progress / task.maxProgress) * 100);
+                const estimatedDays = BuildingSystem.getEstimatedDays(task);
+                const materialsSpent = task.materialsSpent || 0;
+                const partsSpent = task.partsSpent || 0;
+
                 rqHtml += `<div class="patient-card" style="margin-bottom: 10px;">
                     <div class="patient-info">
                         <div class="patient-name">${targetName}</div>
-                        <div class="patient-condition">进度: ${Math.floor(task.progress)}% / 100%</div>
+                        <div class="patient-condition">进度: ${progressPercent}% / 100% | 预计: ${estimatedDays === '∞' ? '需分配工人' : `还剩${estimatedDays}天`} | 已投入: ${materialsSpent}材料${partsSpent > 0 ? `、${partsSpent}零件` : ''}</div>
                         <div style="width: 100%; height: 6px; background: var(--bg-dark); border-radius: 3px; margin-top: 4px; overflow: hidden;">
-                            <div style="width: ${task.progress}%; height: 100%; background: var(--primary);"></div>
+                            <div style="width: ${progressPercent}%; height: 100%; background: var(--primary);"></div>
                         </div>
                         <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-                            材料: ${task.materialsCost} | 零件: ${task.partsCost} | 工人: ${assignedWorkers.length}
+                            工人: ${assignedWorkers.length}人 | 创建于第${task.createdAt}天
                         </div>
                     </div>
                     <div style="display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start;">

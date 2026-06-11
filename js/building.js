@@ -43,6 +43,8 @@ const BuildingSystem = {
         let taskName = '';
         let maxHealth = 100;
         let currentHealth = 0;
+        let materialsCost = 0;
+        let partsCost = 0;
 
         if (targetType === 'room') {
             const room = this.findRoom(targetId);
@@ -50,22 +52,30 @@ const BuildingSystem = {
             const roomData = GameData.rooms.find(r => r.id === room.type);
             taskName = roomData ? roomData.name : '房间';
             currentHealth = room.health;
+            materialsCost = Math.ceil((maxHealth - currentHealth) / 10) * 2;
+            partsCost = 0;
         } else if (targetType === 'power') {
             if (state.power.working) return null;
             taskName = '电力系统';
             currentHealth = 0;
+            materialsCost = 15;
+            partsCost = 5;
         } else if (targetType === 'gate') {
             if (state.gate.working && state.gate.health >= 100) return null;
             taskName = '门禁系统';
             currentHealth = state.gate.health;
+            materialsCost = 10;
+            partsCost = 3;
         } else {
             return null;
         }
 
-        const repairCost = Math.ceil((maxHealth - currentHealth) / 10) * 2;
-        
-        if (!GameState.hasResource('materials', repairCost)) {
-            UI.showToast(`材料不足！需要${repairCost}材料`, 'error');
+        if (!GameState.hasResource('materials', materialsCost)) {
+            UI.showToast(`材料不足！需要${materialsCost}材料`, 'error');
+            return null;
+        }
+        if (partsCost > 0 && !GameState.hasResource('parts', partsCost)) {
+            UI.showToast(`零件不足！需要${partsCost}零件`, 'error');
             return null;
         }
 
@@ -77,15 +87,22 @@ const BuildingSystem = {
             progress: 0,
             maxProgress: maxHealth - currentHealth,
             assignedWorkers: [...assignedWorkers],
-            materialsSpent: repairCost,
+            materialsSpent: materialsCost,
+            partsSpent: partsCost,
             createdAt: state.day
         };
 
-        GameState.removeResource('materials', repairCost);
-        GameState.addResourceConsumed('materials', repairCost);
+        GameState.removeResource('materials', materialsCost);
+        GameState.addResourceConsumed('materials', materialsCost);
+        if (partsCost > 0) {
+            GameState.removeResource('parts', partsCost);
+            GameState.addResourceConsumed('parts', partsCost);
+        }
         state.repairQueue.push(task);
 
-        GameState.addLog(`已创建${taskName}的维修任务，消耗${repairCost}材料。`, 'info');
+        let costStr = `${materialsCost}材料`;
+        if (partsCost > 0) costStr += `、${partsCost}零件`;
+        GameState.addLog(`已创建${taskName}的维修任务，消耗${costStr}。`, 'info');
         UI.showToast(`${taskName}维修任务已创建`, 'success');
         GameState.save();
         return task;
@@ -97,11 +114,33 @@ const BuildingSystem = {
         if (idx === -1) return false;
         
         const task = state.repairQueue[idx];
+        const progressRatio = task.progress / task.maxProgress;
+        const materialsReturned = Math.floor(task.materialsSpent * (1 - progressRatio) * 0.5);
+        const partsReturned = Math.floor((task.partsSpent || 0) * (1 - progressRatio) * 0.5);
+        
         state.repairQueue.splice(idx, 1);
-        GameState.addLog(`${task.name}的维修任务已取消。`, 'info');
-        UI.showToast(`${task.name}维修任务已取消`, 'info');
+        
+        let returnStr = '';
+        if (materialsReturned > 0) {
+            GameState.addResource('materials', materialsReturned);
+            GameState.addResourceConsumed('materials', -materialsReturned);
+            returnStr += `${materialsReturned}材料`;
+        }
+        if (partsReturned > 0) {
+            GameState.addResource('parts', partsReturned);
+            GameState.addResourceConsumed('parts', -partsReturned);
+            if (returnStr) returnStr += '、';
+            returnStr += `${partsReturned}零件`;
+        }
+        
+        GameState.addLog(`${task.name}的维修任务已取消${returnStr ? `，返还${returnStr}` : ''}。`, 'info');
+        UI.showToast(`${task.name}维修任务已取消${returnStr ? `，返还${returnStr}` : ''}`, 'info');
         GameState.save();
-        return true;
+        return {
+            success: true,
+            materialsReturned,
+            partsReturned
+        };
     },
 
     assignWorkerToRepair(taskId, residentId) {
@@ -331,55 +370,35 @@ const BuildingSystem = {
     },
 
     repairPower() {
-        const state = GameState.getState();
-        
-        if (state.power.working) {
-            UI.showToast('电力系统正常', 'info');
-            return false;
-        }
-
-        if (!GameState.hasResource('materials', 15) || !GameState.hasResource('parts', 5)) {
-            UI.showToast('材料或零件不足', 'error');
-            return false;
-        }
-
-        GameState.removeResource('materials', 15);
-        GameState.removeResource('parts', 5);
-        GameState.addResourceConsumed('materials', 15);
-        GameState.addResourceConsumed('parts', 5);
-        
-        const mechanics = GameState.getState().residents.filter(r => r.traits.includes('mechanic')).length;
-        const repairBonus = mechanics > 0 ? 0.5 : 0;
-        
-        state.power.working = true;
-        GameState.addLog('电力系统已修复。', 'success');
-        UI.showToast('电力系统修复完成', 'success');
-        GameState.save();
-        return true;
+        const task = this.addRepairTask('power', 'power', []);
+        return task !== null;
     },
 
     repairGate() {
+        const task = this.addRepairTask('gate', 'gate', []);
+        return task !== null;
+    },
+
+    getEstimatedDays(task) {
         const state = GameState.getState();
+        if (task.assignedWorkers.length === 0) return '∞';
         
-        if (state.gate.working && state.gate.health >= 100) {
-            UI.showToast('门禁系统正常', 'info');
-            return false;
-        }
-
-        if (!GameState.hasResource('materials', 10) || !GameState.hasResource('parts', 3)) {
-            UI.showToast('材料或零件不足', 'error');
-            return false;
-        }
-
-        GameState.removeResource('materials', 10);
-        GameState.removeResource('parts', 3);
+        let dailyProgress = 0;
+        task.assignedWorkers.forEach(resId => {
+            const worker = state.residents.find(r => r.id === resId);
+            if (worker && worker.status === 'healthy' && !worker.onMission) {
+                let workerProgress = 10 + worker.skills.build * 0.3;
+                if (worker.traits.includes('mechanic')) workerProgress *= 1.5;
+                if (worker.traits.includes('hardworking')) workerProgress *= 1.2;
+                if (worker.job === 'builder') workerProgress *= 1.3;
+                dailyProgress += workerProgress;
+            }
+        });
         
-        state.gate.working = true;
-        state.gate.health = 100;
-        GameState.addLog('门禁系统已修复。', 'success');
-        UI.showToast('门禁系统修复完成', 'success');
-        GameState.save();
-        return true;
+        if (dailyProgress <= 0) return '∞';
+        const remainingProgress = task.maxProgress - task.progress;
+        const days = Math.ceil(remainingProgress / dailyProgress);
+        return days;
     },
 
     damageGate(damage = 20) {

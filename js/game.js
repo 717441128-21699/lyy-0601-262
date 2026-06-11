@@ -167,8 +167,10 @@ const Game = {
                     <p>存活天数: <strong>${state.day}</strong> 天</p>
                     <p>最终人口: <strong>${state.residents.length}</strong> 人</p>
                     <p>累计接纳: <strong>${stats.totalJoined}</strong> 人</p>
-                    <p>死亡人数: <strong>${stats.totalDeaths}</strong> 人</p>
-                    <p>病亡人数: <strong>${stats.totalSickDeaths || 0}</strong> 人</p>
+                    <p>总死亡人数: <strong>${stats.totalDeaths}</strong> 人</p>
+                    <p>├ 正常死亡: <strong>${stats.totalNormalDeaths || 0}</strong> 人</p>
+                    <p>├ 病亡: <strong>${stats.totalSickDeaths || 0}</strong> 人</p>
+                    <p>└ 探索牺牲: <strong>${stats.totalExplorationDeaths || 0}</strong> 人</p>
                     <p>治愈人数: <strong>${stats.totalHealed}</strong> 人</p>
                     <p>建造房间: <strong>${stats.totalRoomsBuilt}</strong> 个</p>
                     <p>探索次数: <strong>${stats.totalExplorations}</strong> 次</p>
