@@ -62,6 +62,7 @@ const BuildingSystem = {
         UI.showToast(`建造成功：${roomData.name}`, 'success');
         
         GameState.checkAchievements();
+        GameState.save();
         return true;
     },
 
@@ -88,6 +89,7 @@ const BuildingSystem = {
         const roomData = GameData.rooms.find(r => r.id === room.type);
         GameState.addLog(`修复了${roomData.name}。`, 'success');
         UI.showToast('修复完成', 'success');
+        GameState.save();
         return true;
     },
 
@@ -188,6 +190,7 @@ const BuildingSystem = {
         state.gate.health = 100;
         GameState.addLog('门禁系统已修复。', 'success');
         UI.showToast('门禁系统修复完成', 'success');
+        GameState.save();
         return true;
     },
 

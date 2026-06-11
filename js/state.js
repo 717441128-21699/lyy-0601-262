@@ -1,7 +1,60 @@
 const GameState = {
     state: null,
+    globalDataKey: 'shelter_global_data',
+
+    getGlobalData() {
+        try {
+            const data = localStorage.getItem(this.globalDataKey);
+            if (data) {
+                return JSON.parse(data);
+            }
+        } catch (e) {
+            console.error('读取全局数据失败:', e);
+        }
+        return {
+            achievements: [],
+            unlockedDifficulties: ['easy', 'normal', 'hard'],
+            highScores: {}
+        };
+    },
+
+    saveGlobalData(data) {
+        try {
+            localStorage.setItem(this.globalDataKey, JSON.stringify(data));
+        } catch (e) {
+            console.error('保存全局数据失败:', e);
+        }
+    },
+
+    unlockAchievement(achievementId) {
+        const globalData = this.getGlobalData();
+        if (!globalData.achievements.includes(achievementId)) {
+            globalData.achievements.push(achievementId);
+            this.saveGlobalData(globalData);
+        }
+        
+        if (achievementId === 'hard_mode') {
+            this.unlockDifficulty('nightmare');
+        }
+    },
+
+    unlockDifficulty(difficulty) {
+        const globalData = this.getGlobalData();
+        if (!globalData.unlockedDifficulties.includes(difficulty)) {
+            globalData.unlockedDifficulties.push(difficulty);
+            this.saveGlobalData(globalData);
+            UI.showToast(`难度已解锁：${GameData.difficulties[difficulty].name}`, 'success');
+        }
+    },
+
+    isDifficultyUnlocked(difficulty) {
+        const globalData = this.getGlobalData();
+        return globalData.unlockedDifficulties.includes(difficulty);
+    },
 
     init(difficulty = 'normal') {
+        const globalData = this.getGlobalData();
+        
         const diff = GameData.difficulties[difficulty];
         this.state = {
             day: 1,
@@ -47,7 +100,7 @@ const GameState = {
                 totalRoomsBuilt: 0,
                 totalHealed: 0
             },
-            achievements: [],
+            achievements: [...globalData.achievements],
             gameOver: false,
             ending: null,
             log: []
@@ -242,6 +295,7 @@ const GameState = {
             if (cond.difficulty && state.difficulty !== cond.difficulty) unlocked = false;
             
             if (unlocked) {
+                this.unlockAchievement(achievement.id);
                 state.achievements.push(achievement.id);
                 this.addLog(`🏆 成就解锁：${achievement.name}！`, 'success');
                 UI.showToast(`成就解锁：${achievement.name}`, 'success');

@@ -124,6 +124,7 @@ const Game = {
         state.policies.curfew = !state.policies.curfew;
         GameState.addLog(`宵禁政策${state.policies.curfew ? '已开启' : '已关闭'}。`, 'info');
         UI.showToast(`宵禁${state.policies.curfew ? '开启' : '关闭'}`, 'info');
+        GameState.save();
         UI.renderAll();
     },
 
@@ -133,6 +134,7 @@ const Game = {
         const names = { normal: '正常', reduced: '减配', starvation: '最低' };
         GameState.addLog(`食物配给调整为${names[level]}。`, 'info');
         UI.showToast(`配给制：${names[level]}`, 'info');
+        GameState.save();
         UI.renderAll();
     },
 
@@ -142,6 +144,7 @@ const Game = {
         const names = { friendly: '友好', neutral: '中立', hostile: '敌对' };
         GameState.addLog(`对外政策调整为${names[policy]}。`, 'info');
         UI.showToast(`对外政策：${names[policy]}`, 'info');
+        GameState.save();
         UI.renderAll();
     }
 };

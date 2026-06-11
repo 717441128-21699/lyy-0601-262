@@ -57,11 +57,15 @@ const MedicalSystem = {
             ResidentSystem.recoverFromSickness(resident);
             state.stats.totalHealed++;
             GameState.checkAchievements();
+            GameState.addLog(`${resident.name} 治疗后痊愈了。`, 'success');
             UI.showToast(`${resident.name} 痊愈了！`, 'success');
+            GameState.save();
             return true;
         } else {
             resident.sickDays = Math.max(0, resident.sickDays - 2);
+            GameState.addLog(`${resident.name} 接受了治疗，病情有所好转。`, 'info');
             UI.showToast('治疗有效果，但还需要继续治疗', 'info');
+            GameState.save();
             return false;
         }
     },
@@ -109,11 +113,14 @@ const MedicalSystem = {
             ResidentSystem.healInjury(resident);
             state.stats.totalHealed++;
             GameState.checkAchievements();
+            GameState.addLog(`${resident.name} 的伤好了！`, 'success');
             UI.showToast(`${resident.name} 的伤好了！`, 'success');
         } else {
+            GameState.addLog(`${resident.name} 接受了治疗，伤势有所好转。`, 'info');
             UI.showToast('伤势有所好转', 'info');
         }
 
+        GameState.save();
         return true;
     },
 
@@ -123,16 +130,25 @@ const MedicalSystem = {
         
         if (!resident) return false;
         
+        if (resident.quarantined) {
+            UI.showToast('该居民已在隔离中', 'info');
+            return false;
+        }
+
         const quarantineBeds = ResourceSystem.getQuarantineBeds();
         const quarantined = this.getQuarantined();
         
         if (quarantined.length >= quarantineBeds) {
-            UI.showToast('隔离区床位不足', 'error');
+            UI.showToast('隔离区床位不足，请先建造更多隔离区', 'error');
             return false;
         }
 
         resident.quarantined = true;
-        GameState.addLog(`${resident.name} 被隔离了。`, 'info');
+        if (resident.assignedRoom) {
+            resident.assignedRoom = null;
+        }
+        GameState.addLog(`${resident.name} 被送进隔离区。`, 'warning');
+        UI.showToast(`${resident.name} 已送入隔离区`, 'info');
         return true;
     },
 
@@ -141,8 +157,15 @@ const MedicalSystem = {
         const resident = state.residents.find(r => r.id === residentId);
         
         if (!resident) return false;
+        
+        if (!resident.quarantined) {
+            UI.showToast('该居民不在隔离中', 'info');
+            return false;
+        }
+
         resident.quarantined = false;
         GameState.addLog(`${resident.name} 解除隔离。`, 'info');
+        UI.showToast(`${resident.name} 已解除隔离`, 'info');
         return true;
     },
 

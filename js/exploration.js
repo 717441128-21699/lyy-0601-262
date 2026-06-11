@@ -74,6 +74,7 @@ const ExplorationSystem = {
         this.currentSelection = null;
         this.selectedTeam = [];
         
+        GameState.save();
         return mission;
     },
 

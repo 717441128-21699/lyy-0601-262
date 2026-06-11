@@ -82,7 +82,16 @@ const ResidentSystem = {
         const resident = state.residents.find(r => r.id === residentId);
         if (!resident) return false;
 
+        const oldJob = resident.job;
         resident.job = jobId;
+        
+        if (jobId === 'idle' || jobId === 'scavenger' || jobId === 'guard') {
+            if (resident.assignedRoom) {
+                resident.assignedRoom = null;
+                GameState.addLog(`${resident.name} 的房间分配已取消。`);
+            }
+        }
+        
         GameState.addLog(`${resident.name} 被分配为${this.getJob(jobId).name}。`);
         return true;
     },
@@ -124,12 +133,15 @@ const ResidentSystem = {
             resident.health -= 3;
             resident.morale -= 5;
             
-            if (Math.random() < 0.05 && resident.sickDays > 3) {
+            if (!resident.quarantined && Math.random() < 0.05 && resident.sickDays > 3) {
                 this.spreadDisease(resident);
             }
             
             if (resident.sickDays > 7 && Math.random() < 0.3) {
                 this.recoverFromSickness(resident);
+                if (resident.quarantined) {
+                    MedicalSystem.unquarantine(resident.id);
+                }
             }
         }
 

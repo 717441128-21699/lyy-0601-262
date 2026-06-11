@@ -302,10 +302,14 @@ const UI = {
         const detailPanel = document.getElementById('resident-detail');
         const job = ResidentSystem.getJob(resident.job);
         
+        let assignedRoom = null;
+        if (resident.assignedRoom) {
+            assignedRoom = BuildingSystem.findRoom(resident.assignedRoom);
+        }
+
         let html = `
             <h3>${resident.avatar} ${resident.name}</h3>
             <p>年龄: ${resident.age}岁</p>
-            <p>职业: ${job ? job.name : '无'}</p>
             <p>状态: ${this.getStatusText(resident)}</p>
             <br>
             <h4>属性</h4>
@@ -332,19 +336,132 @@ const UI = {
             </div>
             <br>
             <h4>工作分配</h4>
-            <select id="job-select" onchange="UI.changeResidentJob('${resident.id}', this.value)">
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">选择职业和工作房间：</p>
+            <select id="job-select" onchange="UI.changeResidentJob('${resident.id}', this.value)" style="width: 100%; padding: 8px; margin-bottom: 10px;">
                 ${GameData.jobs.map(j => `
                     <option value="${j.id}" ${resident.job === j.id ? 'selected' : ''}>
                         ${j.icon} ${j.name}
                     </option>
                 `).join('')}
             </select>
+            ${this.getRoomAssignmentUI(resident)}
             <br><br>
             <button class="btn" onclick="document.getElementById('resident-detail').classList.add('hidden')">关闭</button>
         `;
 
         detailPanel.innerHTML = html;
         detailPanel.classList.remove('hidden');
+    },
+
+    getRoomAssignmentUI(resident) {
+        const state = GameState.getState();
+        const job = ResidentSystem.getJob(resident.job);
+        
+        if (resident.job === 'idle' || resident.job === 'scavenger' || resident.job === 'guard') {
+            return '';
+        }
+
+        const suitableRooms = [];
+        state.floors.forEach(floor => {
+            floor.rooms.forEach(room => {
+                const roomData = GameData.rooms.find(r => r.id === room.type);
+                if (!roomData || room.health < 30) return;
+
+                let suitable = false;
+                if (resident.job === 'farmer' && room.type === 'farm') suitable = true;
+                if (resident.job === 'water_worker' && room.type === 'water_plant') suitable = true;
+                if (resident.job === 'builder' && (room.type === 'workshop' || room.type === 'power_room')) suitable = true;
+                if (resident.job === 'doctor' && (room.type === 'medical_room' || room.type === 'quarantine')) suitable = true;
+                if (resident.job === 'chef' && room.type === 'canteen') suitable = true;
+                if (resident.job === 'scientist' && room.type === 'lab') suitable = true;
+
+                if (suitable) {
+                    suitableRooms.push({ room, floor, roomData });
+                }
+            });
+        });
+
+        if (suitableRooms.length === 0) {
+            return '<p style="font-size: 11px; color: var(--warning);">⚠️ 没有合适的房间，请先建造对应房间</p>';
+        }
+
+        const floor = BuildingSystem.findRoomFloor(resident.assignedRoom);
+        
+        let html = `
+            <div style="margin-top: 10px; padding: 10px; background: var(--bg-dark); border-radius: 5px;">
+                <p style="font-size: 12px; margin-bottom: 8px;">
+                    <strong>工作房间：</strong>
+                    ${resident.assignedRoom ? 
+                        (BuildingSystem.findRoom(resident.assignedRoom) ? 
+                            `${BuildingSystem.findRoom(resident.assignedRoom).icon} ${GameData.rooms.find(r => r.id === BuildingSystem.findRoom(resident.assignedRoom).type).name} (${floor ? floor.name : ''})` 
+                            : '未分配') 
+                        : '未分配'}
+                </p>
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">选择分配到的房间：</p>
+                <select id="room-select" onchange="UI.assignResidentToRoom('${resident.id}', this.value)" style="width: 100%; padding: 6px; font-size: 12px;">
+                    <option value="">-- 请选择房间 --</option>
+                    ${suitableRooms.map(item => {
+                        const currentWorkers = state.residents.filter(r => r.assignedRoom === item.room.id && r.id !== resident.id).length;
+                        const maxWorkers = item.roomData.workers || 2;
+                        const isAssigned = resident.assignedRoom === item.room.id;
+                        return `<option value="${item.room.id}" ${isAssigned ? 'selected' : ''} ${currentWorkers >= maxWorkers && !isAssigned ? 'disabled' : ''}>
+                            ${item.roomData.icon} ${item.roomData.name} (${item.floor.name}) - ${currentWorkers}/${maxWorkers}人
+                            ${currentWorkers >= maxWorkers && !isAssigned ? ' (已满)' : ''}
+                        </option>`;
+                    }).join('')}
+                </select>
+                ${resident.assignedRoom ? `
+                    <button class="btn" style="width: 100%; margin-top: 8px; padding: 6px; font-size: 11px;" 
+                            onclick="UI.removeResidentFromRoom('${resident.id}')">
+                        取消房间分配
+                    </button>
+                ` : ''}
+            </div>
+        `;
+
+        return html;
+    },
+
+    assignResidentToRoom(residentId, roomId) {
+        const state = GameState.getState();
+        const resident = state.residents.find(r => r.id === residentId);
+        if (!resident) return;
+
+        if (!roomId) {
+            this.removeResidentFromRoom(residentId);
+            return;
+        }
+
+        const room = BuildingSystem.findRoom(roomId);
+        if (!room) return;
+
+        const roomData = GameData.rooms.find(r => r.id === room.type);
+        const currentWorkers = state.residents.filter(r => r.assignedRoom === roomId).length;
+        const maxWorkers = roomData.workers || 2;
+
+        if (currentWorkers >= maxWorkers) {
+            this.showToast('该房间工人已满', 'warning');
+            return;
+        }
+
+        resident.assignedRoom = roomId;
+        GameState.addLog(`${resident.name} 被分配到${roomData.name}工作。`);
+        this.showToast(`已分配到${roomData.name}`, 'success');
+        this.showResidentDetail(residentId);
+        this.renderAll();
+        GameState.save();
+    },
+
+    removeResidentFromRoom(residentId) {
+        const state = GameState.getState();
+        const resident = state.residents.find(r => r.id === residentId);
+        if (!resident) return;
+
+        resident.assignedRoom = null;
+        this.showToast('已取消房间分配', 'info');
+        this.showResidentDetail(residentId);
+        this.renderAll();
+        GameState.save();
     },
 
     changeResidentJob(residentId, jobId) {
@@ -610,20 +727,101 @@ const UI = {
     },
 
     showRoomDetail(roomId) {
+        const state = GameState.getState();
         const room = BuildingSystem.findRoom(roomId);
         const floor = BuildingSystem.findRoomFloor(roomId);
         const roomData = GameData.rooms.find(r => r.id === room.type);
+        
+        const assignedWorkers = state.residents.filter(r => r.assignedRoom === roomId);
+        const maxWorkers = roomData.workers || 2;
         
         let html = `
             <h3>${roomData.icon} ${roomData.name}</h3>
             <p>楼层: ${floor.name}</p>
             <p>耐久度: ${room.health}%</p>
             <p>描述: ${roomData.desc}</p>
+        `;
+        
+        if (roomData.production || roomData.workers) {
+            html += `
+                <br>
+                <h4>工人管理</h4>
+                <p style="font-size: 12px; color: var(--text-muted);">
+                    当前工人: ${assignedWorkers.length}/${maxWorkers}人
+                </p>
+            `;
+            
+            if (assignedWorkers.length > 0) {
+                html += '<div style="margin: 10px 0;">';
+                assignedWorkers.forEach(worker => {
+                    html += `
+                        <div class="team-member" style="margin-bottom: 5px;">
+                            <div class="avatar">${worker.avatar}</div>
+                            <span>${worker.name}</span>
+                            <button class="btn" style="margin-left: auto; padding: 2px 8px; font-size: 10px;"
+                                    onclick="UI.removeResidentFromRoom('${worker.id}'); UI.showRoomDetail('${roomId}');">
+                                移除
+                            </button>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+            
+            if (assignedWorkers.length < maxWorkers) {
+                const availableWorkers = state.residents.filter(r => 
+                    r.status === 'healthy' && 
+                    !r.onMission && 
+                    !r.assignedRoom &&
+                    r.job !== 'idle' && 
+                    r.job !== 'scavenger' &&
+                    r.job !== 'guard'
+                );
+                
+                const suitableWorkers = availableWorkers.filter(worker => {
+                    if (worker.job === 'farmer' && room.type === 'farm') return true;
+                    if (worker.job === 'water_worker' && room.type === 'water_plant') return true;
+                    if (worker.job === 'builder' && (room.type === 'workshop' || room.type === 'power_room')) return true;
+                    if (worker.job === 'doctor' && (room.type === 'medical_room' || room.type === 'quarantine')) return true;
+                    if (worker.job === 'chef' && room.type === 'canteen') return true;
+                    if (worker.job === 'scientist' && room.type === 'lab') return true;
+                    return false;
+                });
+                
+                if (suitableWorkers.length > 0) {
+                    html += `
+                        <p style="font-size: 11px; color: var(--text-muted); margin-top: 10px;">可分配的居民：</p>
+                        <select id="add-worker-select" style="width: 100%; padding: 6px; font-size: 12px; margin-bottom: 8px;">
+                            <option value="">-- 选择居民 --</option>
+                            ${suitableWorkers.map(w => `
+                                <option value="${w.id}">${w.avatar} ${w.name} (${ResidentSystem.getJob(w.job).name})</option>
+                            `).join('')}
+                        </select>
+                        <button class="btn btn-primary" style="width: 100%; padding: 6px; font-size: 12px;"
+                                onclick="UI.addWorkerToRoom('${roomId}')">
+                            + 添加工人
+                        </button>
+                    `;
+                } else {
+                    html += '<p style="font-size: 11px; color: var(--text-muted);">没有合适的待分配居民</p>';
+                }
+            }
+        }
+        
+        html += `
             <br>
             <button class="btn" onclick="UI.repairRoom('${roomId}')">🔧 修复 (材料: ${Math.ceil((100 - room.health) / 10) * 2})</button>
         `;
         
         this.showModal(roomData.name, html);
+    },
+
+    addWorkerToRoom(roomId) {
+        const select = document.getElementById('add-worker-select');
+        if (!select || !select.value) return;
+        
+        this.assignResidentToRoom(select.value, roomId);
+        this.showRoomDetail(roomId);
     },
 
     repairRoom(roomId) {
@@ -640,8 +838,11 @@ const UI = {
         document.getElementById('med-quarantine').textContent = ResourceSystem.getQuarantineBeds();
         document.getElementById('med-doctors').textContent = MedicalSystem.getDoctors().length;
 
+        const quarantineBeds = ResourceSystem.getQuarantineBeds();
+        const quarantinedCount = MedicalSystem.getQuarantined().length;
+
         const patientList = document.getElementById('patient-list');
-        const patients = MedicalSystem.getPatients();
+        const patients = MedicalSystem.getPatients().filter(p => !p.quarantined);
         
         if (patients.length === 0) {
             patientList.innerHTML = '<p class="hint">暂无病患</p>';
@@ -649,15 +850,23 @@ const UI = {
             let html = '';
             patients.forEach(patient => {
                 let condition = '';
-                let action = '';
+                let actions = '';
                 
                 if (patient.status === 'sick') {
                     condition = '生病 - ' + (patient.sickType || '流感');
-                    action = `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x2)</button>`;
+                    actions = `<button class="btn" style="padding: 4px 10px; font-size: 11px; margin-right: 5px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x2)</button>`;
+                    
+                    if (!patient.quarantined) {
+                        const canQuarantine = quarantinedCount < quarantineBeds;
+                        actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px; ${canQuarantine ? '' : 'opacity: 0.5; cursor: not-allowed;'}" 
+                                    onclick="${canQuarantine ? `UI.quarantine('${patient.id}')` : ''}">
+                            ${canQuarantine ? '送隔离' : '隔离满'}
+                        </button>`;
+                    }
                 }
                 if (patient.injured) {
                     condition = condition ? condition + ' / 受伤' : '受伤';
-                    action = `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatInjury('${patient.id}')">治疗伤</button>`;
+                    actions += `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatInjury('${patient.id}')">治伤</button>`;
                 }
                 
                 html += `<div class="patient-card">
@@ -665,7 +874,9 @@ const UI = {
                         <div class="patient-name">${patient.avatar} ${patient.name}</div>
                         <div class="patient-condition">${condition}</div>
                     </div>
-                    ${action}
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                        ${actions}
+                    </div>
                 </div>`;
             });
             patientList.innerHTML = html;
@@ -675,16 +886,24 @@ const UI = {
         const quarantined = MedicalSystem.getQuarantined();
         
         if (quarantined.length === 0) {
-            quarantineList.innerHTML = '<p class="hint">隔离区为空</p>';
+            quarantineList.innerHTML = `<p class="hint">隔离区为空 (${quarantinedCount}/${quarantineBeds}床位)</p>`;
         } else {
-            let html = '';
+            let html = `<p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">隔离床位: ${quarantinedCount}/${quarantineBeds}</p>`;
             quarantined.forEach(patient => {
+                let condition = '';
+                if (patient.status === 'sick') condition = '生病 - ' + (patient.sickType || '流感');
+                if (patient.injured) condition = condition ? condition + ' / 受伤' : '受伤';
+                
                 html += `<div class="patient-card">
                     <div class="patient-info">
                         <div class="patient-name">${patient.avatar} ${patient.name}</div>
-                        <div class="patient-condition">隔离中</div>
+                        <div class="patient-condition">隔离中 - ${condition}</div>
                     </div>
-                    <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.unquarantine('${patient.id}')">解除隔离</button>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.unquarantine('${patient.id}')">解除隔离</button>
+                        ${patient.status === 'sick' ? `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatSick('${patient.id}')">治疗 (药品x2)</button>` : ''}
+                        ${patient.injured ? `<button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="UI.treatInjury('${patient.id}')">治伤</button>` : ''}
+                    </div>
                 </div>`;
             });
             quarantineList.innerHTML = html;
@@ -692,23 +911,34 @@ const UI = {
     },
 
     treatSick(residentId) {
-        MedicalSystem.treatSick(residentId);
+        if (MedicalSystem.treatSick(residentId)) {
+            const resident = GameState.getState().residents.find(r => r.id === residentId);
+            if (resident && resident.status === 'healthy' && resident.quarantined) {
+                MedicalSystem.unquarantine(residentId);
+            }
+        }
         this.renderAll();
+        GameState.save();
     },
 
     treatInjury(residentId) {
         MedicalSystem.treatInjury(residentId);
         this.renderAll();
+        GameState.save();
     },
 
     quarantine(residentId) {
-        MedicalSystem.quarantine(residentId);
-        this.renderAll();
+        if (MedicalSystem.quarantine(residentId)) {
+            this.renderAll();
+            GameState.save();
+        }
     },
 
     unquarantine(residentId) {
-        MedicalSystem.unquarantine(residentId);
-        this.renderAll();
+        if (MedicalSystem.unquarantine(residentId)) {
+            this.renderAll();
+            GameState.save();
+        }
     },
 
     renderEvents() {
